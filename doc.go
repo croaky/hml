@@ -94,6 +94,13 @@
 // string; numbers and bools render in their Go form. Rendering never
 // panics on a nil value.
 //
+// Field access (a.b.c): the first segment resolves through the context
+// chain. Each later segment reads a map[string]any key; on any other
+// value the engine falls back to reflection over a struct (pointers are
+// dereferenced), matching a field by its json tag, its db tag, or its
+// name case-insensitively. A missing key or field is a render error, not
+// an empty value, so a typo fails loudly instead of rendering blank.
+//
 // # Secure usage
 //
 //   - Handlers own all data formatting. Templates receive pre-computed,
