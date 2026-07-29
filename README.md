@@ -1,0 +1,41 @@
+# hml
+
+A small, structure-aware template language for Go. Indentation maps to
+HTML nesting, so the parser builds a tree and the renderer emits matched
+tags. Malformed HTML is not expressible.
+
+`.hml` files are source and runtime input. There is no transpiler, generated
+code, or build step. The engine evaluates but never computes; formatting happens
+in Go and arrives pre-formatted.
+
+```go
+tmpl, err := hml.Parse(src, "show.hml", transforms)
+out, err := tmpl.Render(locals, partialFn)
+```
+
+See `doc.go` for the grammar, security model, and value semantics.
+
+## Transforms
+
+The engine ships zero built-ins. Rich text renders through app-registered
+transforms, invoked as `= name(field)`, each of which must sanitize its
+own output:
+
+```go
+transforms := map[string]hml.Transform{
+	"markdown": func(s string) string {
+		var buf bytes.Buffer
+		if err := goldmark.Convert([]byte(s), &buf); err != nil {
+			return ""
+		}
+		return mdPolicy.Sanitize(buf.String())
+	},
+}
+```
+
+Unregistered names are parse errors, so the parser stays the linter.
+The engine itself is stdlib-only.
+
+## License
+
+MIT
