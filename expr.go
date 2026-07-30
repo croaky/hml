@@ -3,6 +3,7 @@ package hml
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -534,7 +535,7 @@ func evalCall(node *astNode, ctx context) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, arg)
+		args = append(args, stripAuthored(arg))
 	}
 	switch fn := callee.(type) {
 	case func(...any) (any, error):
@@ -542,7 +543,7 @@ func evalCall(node *astNode, ctx context) (any, error) {
 	case func(...any) any:
 		return fn(args...), nil
 	default:
-		return nil, fmt.Errorf("cannot call %T as function", callee)
+		return nil, fmt.Errorf("cannot call %s as function", typeName(callee))
 	}
 }
 
@@ -789,11 +790,108 @@ func (c *Context) lookup(key string) (any, bool) {
 	return nil, false
 }
 
+// authored is a string a template author wrote, as against one that
+// arrived as data. The attribute policy needs the difference in a code
+// context, and it cannot read it off the AST: a value reaches a tag
+// through a hash literal, a partial argument, and a ** splat, and the
+// last of those has no AST node to ask about. Riding on the value, the
+// fact survives all three.
+//
+// Unexported, because an app never constructs one. A handler that means
+// to vouch for a string it built says so with SafeJS or SafeCSS.
+//
+// Everywhere but the policy, an authored behaves as its underlying
+// string. That is equal, truthy, stringify, and toAttrVal below, and
+// toFloat by declining it the way it declines any string.
+type authored string
+
+// unauthored returns the plain string behind an authored value, and
+// anything else unchanged. Callers that only need the string use it to
+// stay off the difference.
+func unauthored(v any) any {
+	if a, ok := v.(authored); ok {
+		return string(a)
+	}
+	return v
+}
+
+// isAuthored reports whether a value is a string a template author
+// wrote. This is what the attribute policy asks.
+func isAuthored(v any) bool {
+	_, ok := v.(authored)
+	return ok
+}
+
+// typeName is the type an error message names. A template author asked
+// to splat a string, iterate one, or read a field off one has to see
+// string: authored is hml's bookkeeping, and naming it in a message
+// sends the reader looking for a type their app cannot have.
+func typeName(v any) string {
+	return fmt.Sprintf("%T", unauthored(v))
+}
+
+// stripAuthored returns v with every authored string in it replaced by a
+// plain one. hml's own type must not reach app code: a helper asserts
+// args[0].(string), and one that reads a hash it was handed asserts on
+// the values inside it -- sometimes discarding the result, which turns a
+// missed unwrap into an empty string and no error at all. So the whole
+// argument is cleaned, not its surface.
+//
+// It descends map[string]any and []any, which are what a hash literal
+// and an array literal evaluate to and therefore the only shapes that
+// can hold an authored. A map or slice an app supplied cannot contain
+// one, and hasAuthored answers no for it without allocating, which is
+// what keeps a helper call from copying its arguments.
+func stripAuthored(v any) any {
+	if !hasAuthored(v) {
+		return v
+	}
+	switch x := v.(type) {
+	case authored:
+		return string(x)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = stripAuthored(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = stripAuthored(e)
+		}
+		return out
+	}
+	return v
+}
+
+// hasAuthored reports whether v holds an authored string anywhere
+// stripAuthored would look. It exists so the common call -- no literals
+// among the arguments -- copies nothing.
+func hasAuthored(v any) bool {
+	switch x := v.(type) {
+	case authored:
+		return true
+	case map[string]any:
+		for _, e := range x {
+			if hasAuthored(e) {
+				return true
+			}
+		}
+	case []any:
+		return slices.ContainsFunc(x, hasAuthored)
+	}
+	return false
+}
+
 // evaluate resolves an AST node against a context.
 func evaluate(node *astNode, ctx context) (any, error) {
 	switch node.typ {
 	case astString:
-		return node.str, nil
+		// The one place authorship is minted. An interpolated
+		// string is not authored, however literal its segments:
+		// the template assembled it around a value.
+		return authored(node.str), nil
 	case astInterpString:
 		return evalInterpString(node.segments, ctx)
 	case astNumber:
@@ -894,7 +992,13 @@ func evalCmp(node *astNode, ctx context) (any, error) {
 // equal compares two values. Values must be the same type to be equal (no
 // cross-type coercion). Numeric types (int, int64, float64) are compared by
 // numeric value.
+//
+// Authorship is not part of a value's identity: a template compares a
+// local against a literal constantly, and `status == "Pool"` must not
+// turn on which side a person typed. A miss here renders the other
+// branch and reports nothing, so both sides drop it first.
 func equal(a, b any) bool {
+	a, b = unauthored(a), unauthored(b)
 	if a == nil || b == nil {
 		return a == b
 	}
@@ -952,7 +1056,7 @@ func evalField(parts []string, ctx context) (any, error) {
 				rv = rv.Elem()
 			}
 			if rv.Kind() != reflect.Struct {
-				return nil, fmt.Errorf("cannot access %q on %T", part, val)
+				return nil, fmt.Errorf("cannot access %q on %s", part, typeName(val))
 			}
 			idx, ok := structFieldIndex(rv.Type(), part)
 			if !ok {
@@ -1049,7 +1153,7 @@ func truthy(v any) bool {
 		return false
 	case bool:
 		return x
-	case string, int, int64, float64:
+	case string, authored, int, int64, float64:
 		return true
 	}
 	rv := reflect.ValueOf(v)
@@ -1081,6 +1185,8 @@ func toAttrVal(v any) string {
 		return "\x00false"
 	case string:
 		return x
+	case authored:
+		return string(x)
 	case SafeString:
 		return string(x)
 	case SafeJS:

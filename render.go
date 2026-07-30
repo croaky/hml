@@ -253,11 +253,11 @@ func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {
 
 	allClasses := append(shorthandClasses, attrClasses...)
 	if len(allClasses) > 0 {
-		result = append(result, attrVal{key: "class", val: strings.Join(allClasses, " "), literal: true})
+		result = append(result, attrVal{key: "class", val: strings.Join(allClasses, " "), authored: true})
 	}
 
 	if n.id != "" {
-		result = append(result, attrVal{key: "id", val: n.id, literal: true})
+		result = append(result, attrVal{key: "id", val: n.id, authored: true})
 	}
 
 	// Sort alphabetically by key for stable output
@@ -292,11 +292,16 @@ const unsafeURL = "#ZgotmplZ"
 // can decide per attribute.
 //
 // URL attributes take only relative URLs and an allowlisted scheme. on*
-// and style attributes are code, so they take a literal written in the
-// template — that is application source — or a value the handler marked
+// and style attributes are code, so they take code the template author
+// wrote — that is application source — or a value the handler marked
 // SafeJS or SafeCSS. A plain dynamic value in either is an error rather
 // than an escape, because there is no escaping that makes untrusted data
 // safe as code.
+//
+// Where the author wrote it does not enter into it. A string literal is
+// authored wherever it is typed, and it stays so through a hash literal,
+// a partial argument, and a splat, so markup factored into a partial
+// means what it meant inline.
 func policyAttr(a attrVal) (string, error) {
 	name := strings.ToLower(a.key)
 	switch {
@@ -305,11 +310,11 @@ func policyAttr(a attrVal) (string, error) {
 			return unsafeURL, nil
 		}
 	case strings.HasPrefix(name, "on"):
-		if !a.literal && a.trust != trustJS {
+		if !a.authored && a.trust != trustJS {
 			return "", fmt.Errorf("attribute %s: dynamic value in a JavaScript context requires hml.SafeJS", a.key)
 		}
 	case name == "style":
-		if !a.literal && a.trust != trustCSS {
+		if !a.authored && a.trust != trustCSS {
 			return "", fmt.Errorf("attribute %s: dynamic value in a CSS context requires hml.SafeCSS", a.key)
 		}
 	}
@@ -372,7 +377,7 @@ func renderFor(n node, buf *strings.Builder, ctx context, partialFn PartialFunc,
 	}
 	collection, ok := toAnySlice(val)
 	if !ok {
-		return fmt.Errorf("%s: for requires a slice, got %T", path, val)
+		return fmt.Errorf("%s: for requires a slice, got %s", path, typeName(val))
 	}
 	// Overlay a single child on the parent context and rebind the loop
 	// variables each iteration. The parent is read through, not copied, so a
@@ -477,6 +482,8 @@ func stringify(v any) string {
 		return ""
 	case string:
 		return x
+	case authored:
+		return string(x)
 	case int:
 		return strconv.Itoa(x)
 	case int64:

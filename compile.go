@@ -271,14 +271,19 @@ func evalInterp(segs []interpSeg, ctx context, escape bool) (string, error) {
 }
 
 // attrVal is one evaluated attribute, plus the provenance the attribute
-// policy needs (see policyAttr): whether the value was written as a plain
-// string literal in the template — authored source, not data — and which
-// trust type, if any, the value carried.
+// policy needs (see policyAttr): whether the value is source a template
+// author wrote rather than data that arrived, and which trust type, if
+// any, the value carried.
+//
+// authored is asked of the value, not of the AST node at the attribute.
+// The two agree on an inline literal and part company one step away: a
+// literal passed to a partial and splatted onto a tag there has no AST
+// node here to ask about.
 type attrVal struct {
-	key     string
-	val     string
-	literal bool
-	trust   trust
+	key      string
+	val      string
+	authored bool
+	trust    trust
 }
 
 // trust records a SafeJS/SafeCSS assertion made by the handler.
@@ -303,18 +308,23 @@ func evalAttrs(attrs []attr, ctx context) ([]attrVal, error) {
 		if a.splat {
 			m, ok := val.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("splat requires a map, got %T", val)
+				return nil, fmt.Errorf("splat requires a map, got %s", typeName(val))
 			}
 			for k, v := range m {
-				result = append(result, attrVal{key: k, val: toAttrVal(v), trust: valTrust(v)})
+				result = append(result, attrVal{
+					key:      k,
+					val:      toAttrVal(v),
+					authored: isAuthored(v),
+					trust:    valTrust(v),
+				})
 			}
 			continue
 		}
 		result = append(result, attrVal{
-			key:     a.key,
-			val:     toAttrVal(val),
-			literal: a.val.typ == astString,
-			trust:   valTrust(val),
+			key:      a.key,
+			val:      toAttrVal(val),
+			authored: isAuthored(val),
+			trust:    valTrust(val),
 		})
 	}
 	return result, nil
@@ -344,7 +354,7 @@ func evalLocals(attrs []attr, ctx context) (map[string]any, error) {
 		if a.splat {
 			m, ok := val.(map[string]any)
 			if !ok {
-				return nil, fmt.Errorf("splat requires a map, got %T", val)
+				return nil, fmt.Errorf("splat requires a map, got %s", typeName(val))
 			}
 			maps.Copy(result, m)
 			continue

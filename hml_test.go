@@ -228,8 +228,12 @@ func TestRenderPartial(t *testing.T) {
 	src := "= render \"header\", title: \"Hello\"\n"
 	partialFn := func(name string, ctx *Context) (string, error) {
 		tu.OK(name == "header")
+		// stringify, as every read site in the renderer does: a
+		// value in a context is an hml value, and a literal one
+		// carries its authorship. Reaching past that with a type
+		// assertion is reaching past the engine.
 		title, _ := ctx.lookup("title")
-		return "<h1>" + title.(string) + "</h1>\n", nil
+		return "<h1>" + stringify(title) + "</h1>\n", nil
 	}
 	got := mustRenderPartial(t, src, nil, partialFn)
 	tu.OK(got == "<h1>Hello</h1>\n")
@@ -444,9 +448,13 @@ func TestPartialLocalsPreserveTypes(t *testing.T) {
 	active, _ := received.lookup("active")
 	vActive, okActive := active.(bool)
 	tu.OK(okActive && vActive)
+	// A string literal keeps its authorship into the partial, which is
+	// what lets the partial splat it onto an on* or style attribute. It
+	// is not a plain string here, so it is read the way the renderer
+	// reads one.
 	label, _ := received.lookup("label")
-	vLabel, okLabel := label.(string)
-	tu.OK(okLabel && vLabel == "hi")
+	tu.OK(isAuthored(label))
+	tu.OK(stringify(label) == "hi")
 }
 
 func TestNilOutputRendersEmpty(t *testing.T) {

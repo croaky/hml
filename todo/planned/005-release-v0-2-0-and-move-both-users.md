@@ -27,31 +27,39 @@ v0.2.0, not v0.1.4. The number is free and the break is real.
 2. `scripts/tag v0.2.0`, which pushes the tag to the module path and
    nowhere else. cibot holds no tags: it mirrors nothing, so a tag is a
    deliberate act rather than something a push carries along.
-3. cibot bumps. The attribute policy was verified clean against it: no
-   `on*` attributes, literal `style` values, URLs root-relative or
-   hashed asset paths. That check predates the output change, so the
-   rendered-HTML assertions are still to be looked at.
-4. EDS bumps. Its migration is written and verified the same way: 94
-   image fallbacks collapsed to two handler-marked locals, three
-   per-row values typed, three mail styles built in Go. Same caveat,
-   and it is the one with fixtures.
+3. cibot bumps: replace the local `replace` with the pin, and `go mod
+   tidy`, which is also what drops hml's wrong `// indirect`.
+4. EDS bumps the same way, then staging before production. It is the one
+   with fixtures and the one whose migration this sized.
 
 ## Testing against a user before tagging
 
 Neither user should discover a break from a tag. `scripts/tag` refuses
 a dirty tree and a `main` behind the farmer's, but it cannot know
-whether the code is any good to the two repos that will fetch it. Before
-step 2, point each at the working tree:
+whether the code is any good to the two repos that will fetch it. So
+before step 2, each was pointed at the working tree:
 
 ```sh
-go mod edit -replace github.com/croaky/hml=/Users/dcroak/hml
+go mod edit -replace github.com/croaky/hml=/path/to/hml/worktree
 go build ./... && go test ./...
-go mod edit -dropreplace github.com/croaky/hml
 ```
 
-Run it in cibot and in EDS. The `replace` is a local experiment and must
-not be committed; EDS's result is what sizes its migration, and it is
-worth knowing before the tag exists rather than after.
+Both pass, and doing it first is what found the two things below. The
+`replace` is a local experiment and must not be committed.
+
+The output change cost cibot 17 assertions, all of them a tag and its
+lone line of text written as three. Mechanical, but only visible by
+running it.
+
+EDS's own migration was wrong in a way its build could not show. It
+marked three per-row `onerror` values `SafeJS` in the handler, and
+`/people/show` marshals its whole page struct to JSON and back into a
+`map[string]any` before rendering -- which erases a Go type, so the
+value arrived as a plain string and the policy refused it. The fix was
+to delete those three: each one paired one fallback with one partial, so
+the partial reads the marked global it was already next to, and 34
+handler keys nobody read went with them. A round trip through JSON is
+worth remembering as a place trust types die quietly.
 
 ## A note on version discipline
 

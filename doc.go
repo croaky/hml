@@ -26,26 +26,38 @@
 //
 //   - Well-formed HTML. Every tag opened by the tree is closed by the
 //     tree. You cannot produce <div><p></div></p>.
+//
 //   - = expr HTML-escapes output (&, <, >, ") unless the value is a
 //     SafeString. There is no raw-output syntax: != is a parse error.
 //     The only unescaped paths are SafeString values (produced by the
 //     renderer itself: rendered partials, layout body, csrf tags) and
 //     the transform builtins, which sanitize inside the engine.
+//
 //   - Attribute values are constrained by the context the attribute
 //     puts them in. A URL attribute (href, src, action, formaction,
 //     poster, cite, background, ping, xlink:href) takes a relative URL
 //     or one of http, https, mailto, tel; anything else renders as the
 //     sentinel #ZgotmplZ, as in html/template, so javascript:alert(1)
 //     never reaches the browser. An on* attribute is a JavaScript
-//     context and a style attribute a CSS context: each takes a string
-//     literal written in the template, which is application source, or
-//     a value the handler marked SafeJS or SafeCSS. A plain dynamic
-//     value there is a render error, because no escaping makes
-//     untrusted data safe as code.
+//     context and a style attribute a CSS context: each takes code the
+//     template author wrote, which is application source, or a value
+//     the handler marked SafeJS or SafeCSS. A plain dynamic value there
+//     is a render error, because no escaping makes untrusted data safe
+//     as code.
+//
+//     Code the author wrote means a string literal, wherever it was
+//     typed. It stays authored through a hash literal, a partial
+//     argument, and a ** splat, so markup factored into a partial means
+//     what it meant inline. What ends authorship is the template's
+//     assembling something: an interpolated string is data, however
+//     literal its segments, because a value it did not write is now
+//     part of it.
+//
 //   - The parser rejects anything outside the dumb subset — no method
 //     calls on data, no arbitrary code, no eval. The only callables are
 //     allowlisted helper funcs injected as locals (see Subset grammar).
 //     The parser IS the linter.
+//
 //   - Templates cannot define variables, import modules, or execute
 //     side effects. They only read pre-computed data from the handler.
 //
@@ -162,9 +174,11 @@
 //     producer-sanitized HTML; never wrap raw user input.
 //   - Pre-build URLs in handlers, where you can validate them. The
 //     renderer enforces the scheme allowlist but not the destination.
-//   - Keep on* and style attributes literal. When a value must be
-//     dynamic, build it in Go and mark it SafeJS or SafeCSS, or pass
-//     the data through a data- attribute and read it from JavaScript.
+//   - Write on* and style values as literals, in the template or in a
+//     partial's arguments. When a value must be built from data, build
+//     it in Go and mark it SafeJS or SafeCSS, or pass the data through
+//     a data- attribute and read it from JavaScript. Interpolating data
+//     into one in the template is the case the policy refuses.
 //   - :javascript filter blocks pass through without escaping. Don't
 //     interpolate user-controlled values into JS. Use data- attributes
 //     on HTML elements instead, and read them from JS.
