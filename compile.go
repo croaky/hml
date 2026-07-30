@@ -42,11 +42,27 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 				return fmt.Errorf("%s: output %q: %w", path, n.text, err)
 			}
 			n.exprAST = ast
-		case kindTransform:
-			fn, ok := transforms[n.text]
+		case kindCall:
+			// A registered name is a transform: it takes one field,
+			// sanitizes app-side, and its result is emitted unescaped, so
+			// the narrow argument keeps template-side content assembly
+			// impossible. Any other name is an ordinary call on a helper
+			// func injected as a local, compiled from the line as written
+			// and escaped like every other = output.
+			fn, ok := transforms[n.callName]
 			if !ok {
-				return fmt.Errorf("%s: unknown transform %q", path, n.text)
+				ast, err := compileExpr(n.text)
+				if err != nil {
+					return fmt.Errorf("%s: call %q: %w", path, n.text, err)
+				}
+				n.kind = kindOutput
+				n.exprAST = ast
+				break
 			}
+			if !transformFieldRE.MatchString(n.expr) {
+				return fmt.Errorf("%s: transform argument must be a single field access: = %s", path, n.text)
+			}
+			n.kind = kindTransform
 			n.transform = fn
 			ast, err := compileExpr(n.expr)
 			if err != nil {

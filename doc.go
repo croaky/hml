@@ -54,14 +54,26 @@
 // (see Transform), invoked as = name(field). The engine ships zero
 // built-ins; the app passes a name→Transform map to Parse. Each
 // transform evaluates the field, sanitizes it, and the renderer emits
-// the result unescaped, so a Transform must return safe HTML. The
-// parser rejects unregistered names, and the argument must be exactly
-// one field-access path — no literals, interpolation, or nesting — so
-// template-side content assembly is impossible. Handlers pass source
-// text (markdown, Slack mrkdwn, ts_headline output), never pre-built
-// HTML. Parenthesized call syntax (= name(field)) is reserved for
-// transforms. One project, for example, registers markdown, slack, and
-// search_highlight in its own richtext package.
+// the result unescaped, so a Transform must return safe HTML. A
+// transform's argument must be exactly one field-access path — no
+// literals, interpolation, or nesting — so template-side content
+// assembly is impossible. Handlers pass source text (markdown, Slack
+// mrkdwn, ts_headline output), never pre-built HTML. One project, for
+// example, registers markdown, slack, and search_highlight in its own
+// richtext package.
+//
+// # Calls
+//
+// name(args) is a call, and means the same thing in output position and
+// in an attribute value. A registered transform name resolves to that
+// transform, under the rules above. Any other name resolves to an
+// allowlisted helper func injected as a local, takes as many arguments
+// as it likes, and has its result escaped like any other = output.
+//
+// Resolving a helper needs the locals, which arrive per render, so an
+// unknown name is a render error rather than a parse error. That is the
+// one place the parser stops being the linter: a misspelled transform
+// name reads as a helper the app did not inject.
 //
 // # Value semantics
 //
@@ -125,6 +137,8 @@
 //	= name(field)                   app-registered rich-text transform
 //	                                (render + sanitize app-side;
 //	                                argument is one field access)
+//	= helper(a, b)                  allowlisted helper call, in output or
+//	                                in an attribute value
 //	- if expr / - elsif / - else    conditionals
 //	- for item in items             loops (optional index: for i, item)
 //	= render "name", key: val       partials

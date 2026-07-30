@@ -82,6 +82,7 @@ const (
 	kindElse
 	kindFor
 	kindRender    // = render "partial", key: val
+	kindCall      // = name(args), before compileNodes resolves it
 	kindTransform // = markdown(field), = slack(field), = search_highlight(field)
 )
 
@@ -90,6 +91,7 @@ type node struct {
 	indent      int
 	text        string   // for text, output, render expr
 	expr        string   // if/elsif condition, for collection
+	callName    string   // for kindCall: the name before the parens
 	tag         string   // for tag
 	classes     []string // for tag
 	id          string   // for tag

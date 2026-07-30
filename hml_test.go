@@ -505,9 +505,9 @@ func TestSplatBooleanAttributes(t *testing.T) {
 	tu.OK(!strings.Contains(got, "disabled"))
 }
 
-// Parenthesized call syntax (= name(field)) is reserved for the
-// transform builtins; see TestTransformRejectsUnknownName. Bare calls
-// (= fn "arg", key: val) remain for the do_react/react_select shims.
+// Bare calls (= fn "arg", key: val) remain for the do_react/
+// react_select shims. Parenthesized calls work too, and mean the same
+// thing in output and attribute position; see TestCallResolvesHelper.
 func TestBareFunctionCallWithKeywordArgsSupported(t *testing.T) {
 	tu := newAssert(t)
 	tmpl := mustParse(t, "= fn \"Widget\", id: \"abc\", active: true\n")
@@ -558,15 +558,61 @@ func TestEntityHeaderTemplate(t *testing.T) {
 }
 
 // Transform rendering behavior (markdown/slack/search_highlight output)
-// is tested app-side, where the sanitizing transforms
-// live. The engine tests below cover only parse-time validation: the
-// transform name against the registered set, and the single-field-access
-// argument restriction.
-func TestTransformRejectsUnknownName(t *testing.T) {
+// is tested app-side, where the sanitizing transforms live. The engine
+// tests below cover how a call resolves, and the single-field-access
+// restriction on a transform's argument.
+
+// A name that is not a registered transform is a helper func the app
+// injected as a local, so it is resolved at render rather than
+// rejected at parse. The cost is that a misspelled transform name is a
+// render error instead of a parse error; the engine cannot tell the two
+// apart without the locals, which arrive per render.
+func TestCallOfUnknownNameFailsAtRender(t *testing.T) {
 	tu := newAssert(t)
-	_, err := Parse("= foobar(row.x)\n", "test.hml", testTransforms)
+	tmpl, err := Parse("= foobar(row.x)\n", "test.hml", testTransforms)
+	tu.OK(err == nil)
+	_, err = tmpl.Render(map[string]any{"row": map[string]any{"x": "v"}}, nil)
 	tu.OK(err != nil)
-	tu.OK(strings.Contains(err.Error(), "unknown transform"))
+}
+
+// One syntax, one meaning, wherever it appears: a parenthesized call on
+// an injected helper reads the same in output and in an attribute. The
+// two disagreed before -- output rejected the name as an unknown
+// transform while the attribute path called it.
+func TestCallResolvesHelper(t *testing.T) {
+	tu := newAssert(t)
+	locals := map[string]any{
+		"c": map[string]any{"id": "CI-1", "sha": "abcdef"},
+		"url": func(args ...any) (any, error) {
+			if len(args) == 2 {
+				return fmt.Sprintf("/change/%v/%v", args[0], args[1]), nil
+			}
+			return fmt.Sprintf("/change/%v", args[0]), nil
+		},
+	}
+	tu.OK(mustRender(t, "= url(c.id)\n", locals) == "/change/CI-1\n")
+	// More than one argument, which a transform cannot take.
+	tu.OK(mustRender(t, "= url(c.id, c.sha)\n", locals) == "/change/CI-1/abcdef\n")
+	got := mustRender(t, "%a{ href: url(c.id) }\n  x\n", locals)
+	tu.OK(strings.Contains(got, `href="/change/CI-1"`))
+}
+
+// A registered name still means the transform, and a helper of the same
+// name does not shadow it.
+func TestTransformWinsOverLocal(t *testing.T) {
+	tu := newAssert(t)
+	transforms := map[string]Transform{
+		"markdown": func(s string) string { return "<p>" + s + "</p>" },
+	}
+	tmpl, err := Parse("= markdown(row.x)\n", "test.hml", transforms)
+	tu.OK(err == nil)
+	got, err := tmpl.Render(map[string]any{
+		"row":      map[string]any{"x": "hi"},
+		"markdown": func(args ...any) (any, error) { return "local", nil },
+	}, nil)
+	tu.OK(err == nil)
+	// The transform's output, emitted unescaped as transforms are.
+	tu.OK(got == "<p>hi</p>\n")
 }
 
 func TestTransformRejectsNonFieldArguments(t *testing.T) {

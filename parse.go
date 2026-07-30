@@ -168,17 +168,24 @@ func parseLine(stripped string, indent int, lines []string, childFrom, childTo i
 		return node{kind: kindRender, text: strings.TrimSpace(stripped[2:]), indent: indent}, nil
 	}
 
-	// Transform builtins: = markdown(field) etc. Rich text renders and
-	// sanitizes app-side; handlers pass source text. The argument must be
-	// a single field-access path. The name is validated against the
-	// app-registered transforms in compileNodes, not here.
-	if m := transformRE.FindStringSubmatch(stripped); m != nil {
-		name := m[1]
-		field := strings.TrimSpace(m[2])
-		if !transformFieldRE.MatchString(field) {
-			return node{}, fmt.Errorf("%s: transform argument must be a single field access: %s", path, stripped)
-		}
-		return node{kind: kindTransform, text: name, expr: field, indent: indent}, nil
+	// A parenthesized call: = markdown(body), = commit_url(id, sha).
+	// Which one it is depends on the app-registered transforms, which
+	// this does not have, so compileNodes decides: a registered name is
+	// a transform, anything else is a helper func injected as a local.
+	//
+	// Deciding here is what made the two positions disagree. An
+	// attribute value has always resolved a parenthesized call through
+	// the expression parser, so `href: url(id)` worked while `= url(id)`
+	// was rejected as an unknown transform. One syntax, one meaning,
+	// wherever it appears.
+	if m := callRE.FindStringSubmatch(stripped); m != nil {
+		return node{
+			kind:     kindCall,
+			callName: m[1],
+			expr:     strings.TrimSpace(m[2]),
+			text:     stripped[2:],
+			indent:   indent,
+		}, nil
 	}
 
 	// Raw output was removed: = honors SafeString for renderer-built
@@ -205,7 +212,10 @@ func parseLine(stripped string, indent int, lines []string, childFrom, childTo i
 // `for i, item in collection`. Group 1 is the optional index variable,
 // group 2 the element variable, group 3 the collection expression.
 var forRE = regexp.MustCompile(`\Afor (?:(\w+), )?(\w+) in (.+)\z`)
-var transformRE = regexp.MustCompile(`\A= ([a-z_][a-z0-9_]*)\((.*)\)\z`)
+
+// callRE matches a whole-line call: a name, then a parenthesized
+// argument list.
+var callRE = regexp.MustCompile(`\A= ([a-z_][a-z0-9_]*)\((.*)\)\z`)
 
 // A transform argument: one field-access path, nothing else.
 var transformFieldRE = regexp.MustCompile(`\A[a-z_][a-zA-Z0-9_]*(\.[a-z_][a-zA-Z0-9_]*)*\z`)
