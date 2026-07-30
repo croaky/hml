@@ -137,7 +137,7 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialFunc,
 			buf.WriteString(tag)
 			buf.WriteString(as)
 			buf.WriteByte('>')
-			buf.WriteString(strings.TrimSpace(inner.String()))
+			buf.WriteString(trimRenderedNewline(inner.String()))
 			buf.WriteString("</")
 			buf.WriteString(tag)
 			buf.WriteString(">\n")
@@ -162,6 +162,16 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialFunc,
 		buf.WriteString(">\n")
 	}
 	return nil
+}
+
+// trimRenderedNewline drops the single trailing newline the renderer
+// itself wrote after the last child. Inside a preserve element the
+// rest of the whitespace is content: a diff patch or a terminal
+// transcript begins its lines with the spaces that align them, and a
+// blanket trim would silently reflow the text the element exists to
+// preserve.
+func trimRenderedNewline(s string) string {
+	return strings.TrimSuffix(s, "\n")
 }
 
 func buildAttrs(n node, ctx context, path string) ([][2]string, error) {

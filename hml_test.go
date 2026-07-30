@@ -315,6 +315,16 @@ func TestPreserveElement(t *testing.T) {
 	tu.OK(got == "<textarea>hello</textarea>\n")
 }
 
+func TestPreserveElementKeepsContentWhitespace(t *testing.T) {
+	tu := newAssert(t)
+	// A patch's leading spaces are the alignment a reader reads it by,
+	// so a pre keeps them and drops only the newline the renderer added.
+	src := "%pre\n  = patch\n"
+	patch := SafeString("@@ -1,2 +1,2 @@\n context\n-old\n+new\n")
+	got := mustRender(t, src, map[string]any{"patch": patch})
+	tu.OK(got == "<pre>@@ -1,2 +1,2 @@\n context\n-old\n+new\n</pre>\n")
+}
+
 func TestMultiLineAttributes(t *testing.T) {
 	tu := newAssert(t)
 	src := "%a{ href: \"/home\",\n  class: \"link\" }\n  click\n"
