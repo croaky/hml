@@ -1,0 +1,16 @@
+# -trimpath and -buildvcs=false keep a test binary a function of its
+# source alone. Without them a worker's slot path and the commit stamp
+# are built in, so a result cached by one slot never counts for
+# another and every run starts cold.
+test: go test -trimpath -buildvcs=false -race -cover ./...
+
+# gofmt rather than goimports: this module imports nothing outside the
+# standard library, so there is no local-prefix grouping to enforce.
+# -l lists what it would rewrite, and a non-empty list is the failure.
+lint: out=$(gofmt -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi; go vet ./...
+
+# gopls at hint severity is what an editor underlines and nobody
+# reading a diff sees. It exits 0 whether or not it found anything, so
+# its output is the verdict: awk prints what it read, then fails if it
+# read a line.
+hints: git ls-files -z '*.go' | xargs -0 gopls check -severity=hint | awk '1; END { exit (NR > 0) }'

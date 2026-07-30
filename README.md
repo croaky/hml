@@ -36,6 +36,14 @@ transforms := map[string]hml.Transform{
 Unregistered names are parse errors, so the parser stays the linter.
 The engine itself is stdlib-only.
 
+## This repo is a mirror
+
+Development happens on [cibot](https://dancroak.com/cmd/cibot/), a
+self-hosted review and CI server, which holds the branches. GitHub
+receives `main` and the tags, so `go get` works and a commit hash is
+browsable, and pull requests are closed because there is nothing here to
+merge into.
+
 ## License
 
 MIT
