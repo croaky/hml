@@ -9,23 +9,32 @@ moves until someone moves it, and neither is broken while this waits.
 
 ## What ships together
 
-`001` and `002` are additive. `003` is not: it turns markup that renders
-today into a render error or a sentinel. All three go out as one tag, so
-each user reads one changelog and does one bump.
+The field-access fix and the two reporting methods were additive.
+`003` was not: it turns markup that renders today into a render error or
+a sentinel, and `004` is the correction to how it decides. They go out
+as one tag, so each user reads one changelog and does one bump.
+
+The lone-text-child change goes out with them, and it is the one a test
+suite notices: every tag whose only child is text now closes on the
+opening tag's line. No markup changes meaning, but anything comparing
+rendered HTML to a fixture sees a diff on most lines of it.
 
 v0.2.0, not v0.1.4. The number is free and the break is real.
 
 ## Order
 
-1. Land `001`, `002`, `003` on `main`, each its own change.
+1. Land `004` on `main`. The three before it are already there.
 2. `scripts/tag v0.2.0`, which pushes the tag to the module path and
    nowhere else. cibot holds no tags: it mirrors nothing, so a tag is a
    deliberate act rather than something a push carries along.
-3. cibot bumps. It should be a clean upgrade -- see the compatibility
-   note in `003` -- and it is the smaller of the two, so it is the
-   better canary.
-4. EDS bumps, with the `on*` and `style` migration `003` describes. This
-   is the real work, and it is EDS's to schedule.
+3. cibot bumps. The attribute policy was verified clean against it: no
+   `on*` attributes, literal `style` values, URLs root-relative or
+   hashed asset paths. That check predates the output change, so the
+   rendered-HTML assertions are still to be looked at.
+4. EDS bumps. Its migration is written and verified the same way: 94
+   image fallbacks collapsed to two handler-marked locals, three
+   per-row values typed, three mail styles built in Go. Same caveat,
+   and it is the one with fixtures.
 
 ## Testing against a user before tagging
 
