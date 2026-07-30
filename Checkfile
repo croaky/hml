@@ -4,10 +4,12 @@
 # another and every run starts cold.
 test: go test -trimpath -buildvcs=false -race -cover ./...
 
-# gofmt rather than goimports: this module imports nothing outside the
-# standard library, so there is no local-prefix grouping to enforce.
-# -l lists what it would rewrite, and a non-empty list is the failure.
-lint: out=$(gofmt -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi; go vet ./...
+# goimports rather than gofmt, as in every other repo here: one command
+# to remember, and it still holds if this module ever imports something
+# of its own. -l lists what it would rewrite, and a non-empty list is
+# the failure, since a CI job that rewrote source would have nowhere to
+# put it.
+lint: out=$(goimports -local "$(go list -m)" -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi; go vet ./...
 
 # gopls at hint severity is what an editor underlines and nobody
 # reading a diff sees. It exits 0 whether or not it found anything, so
