@@ -2,6 +2,7 @@ package hml
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -780,4 +781,97 @@ func BenchmarkRenderLoop(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestNamesCoversEveryExpressionSite(t *testing.T) {
+	tu := newAssert(t)
+	src := "%a{ href: link, **attrs }\n" +
+		"  text #{caption} more\n" +
+		"- if flag\n" +
+		"  = title\n" +
+		"- elsif other\n" +
+		"  = markdown(body)\n" +
+		"- for row in rows\n" +
+		"  = render \"card\", user: person\n" +
+		":javascript\n" +
+		"  var t = #{token};\n"
+	tmpl := mustParse(t, src)
+	want := []string{
+		"attrs", "body", "caption", "flag", "link", "other",
+		"person", "rows", "title", "token",
+	}
+	tu.OK(slices.Equal(tmpl.Names(), want))
+}
+
+func TestNamesExcludesLoopVariables(t *testing.T) {
+	tu := newAssert(t)
+	src := "- for i, item in items\n" +
+		"  = item.name\n" +
+		"  = i\n" +
+		"  = outer\n"
+	tmpl := mustParse(t, src)
+	tu.OK(slices.Equal(tmpl.Names(), []string{"items", "outer"}))
+}
+
+func TestNamesLoopVariableBindingIsScoped(t *testing.T) {
+	tu := newAssert(t)
+	// item is bound only inside the loop body; the same name read after
+	// the loop is free.
+	src := "- for item in items\n" +
+		"  = item\n" +
+		"= item\n"
+	tmpl := mustParse(t, src)
+	tu.OK(slices.Equal(tmpl.Names(), []string{"item", "items"}))
+}
+
+func TestNamesExcludesRenderArgKeys(t *testing.T) {
+	tu := newAssert(t)
+	// user is a name the partial reads, not one the caller supplies.
+	tmpl := mustParse(t, "= render \"card\", user: person\n")
+	tu.OK(slices.Equal(tmpl.Names(), []string{"person"}))
+}
+
+func TestNamesSortedAndDeduplicated(t *testing.T) {
+	tu := newAssert(t)
+	src := "= zebra\n= apple\n= zebra\n= apple.core\n"
+	tmpl := mustParse(t, src)
+	tu.OK(slices.Equal(tmpl.Names(), []string{"apple", "zebra"}))
+}
+
+func TestNamesIncludesHelperCallsAndNestedValues(t *testing.T) {
+	tu := newAssert(t)
+	src := "= helper(a, b.c)\n" +
+		"%p{ data: { k: d }, list: [e] }\n" +
+		"- if !f && g == \"x\"\n" +
+		"  = \"lit #{h}\"\n"
+	tmpl := mustParse(t, src)
+	want := []string{"a", "b", "d", "e", "f", "g", "h", "helper"}
+	tu.OK(slices.Equal(tmpl.Names(), want))
+}
+
+func TestRendersListsLiteralPartialNames(t *testing.T) {
+	tu := newAssert(t)
+	src := "= render \"b\"\n" +
+		"= render \"a\", k: v\n" +
+		"= render \"b\"\n"
+	tmpl := mustParse(t, src)
+	tu.OK(slices.Equal(tmpl.Renders(), []string{"a", "b"}))
+	tu.OK(slices.Equal(tmpl.Names(), []string{"v"}))
+}
+
+func TestRendersOmitsComputedNames(t *testing.T) {
+	tu := newAssert(t)
+	src := "= render partial\n" +
+		"= render \"cards/#{kind}\"\n" +
+		"= render \"plain\"\n"
+	tmpl := mustParse(t, src)
+	tu.OK(slices.Equal(tmpl.Renders(), []string{"plain"}))
+	tu.OK(slices.Equal(tmpl.Names(), []string{"kind", "partial"}))
+}
+
+func TestNamesDoesNotFollowPartials(t *testing.T) {
+	tu := newAssert(t)
+	tmpl := mustParse(t, "= render \"card\"\n")
+	tu.OK(len(tmpl.Names()) == 0)
+	tu.OK(slices.Equal(tmpl.Renders(), []string{"card"}))
 }

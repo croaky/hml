@@ -15,6 +15,19 @@ out, err := tmpl.Render(locals, partialFn)
 
 See `doc.go` for the grammar, security model, and value semantics.
 
+## Checking locals
+
+A parsed template reports what it reads, so an app can check its locals
+once at startup rather than one page at a time in production:
+
+```go
+tmpl.Names()   // free top-level identifiers the template reads
+tmpl.Renders() // partials it renders by literal name
+```
+
+`Names` answers for one file. A partial inherits its caller's locals, so
+follow `Renders` to check a whole page.
+
 ## Transforms
 
 The engine ships zero built-ins. Rich text renders through app-registered
