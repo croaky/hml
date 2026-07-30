@@ -132,16 +132,36 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialFunc,
 	}
 
 	if len(n.children) > 0 {
-		if preserveElements[tag] {
+		if preserveElements[tag] || loneTextChild(n.children) {
 			var inner strings.Builder
 			if err := renderNodes(n.children, &inner, ctx, partialFn, path); err != nil {
 				return err
+			}
+			text := trimRenderedNewline(inner.String())
+			// A run of text can turn out to be several lines: a
+			// transform emits the HTML it was given, and markdown of
+			// two paragraphs is two blocks. Hanging those off the
+			// opening tag buys nothing -- the collapsed space they
+			// would have is between blocks, where nothing sees it --
+			// and costs the shape that makes the output readable. A
+			// preserve element keeps its lines regardless; there the
+			// whitespace is the content.
+			if !preserveElements[tag] && strings.Contains(text, "\n") {
+				buf.WriteByte('<')
+				buf.WriteString(tag)
+				buf.WriteString(as)
+				buf.WriteString(">\n")
+				buf.WriteString(inner.String())
+				buf.WriteString("</")
+				buf.WriteString(tag)
+				buf.WriteString(">\n")
+				return nil
 			}
 			buf.WriteByte('<')
 			buf.WriteString(tag)
 			buf.WriteString(as)
 			buf.WriteByte('>')
-			buf.WriteString(trimRenderedNewline(inner.String()))
+			buf.WriteString(text)
 			buf.WriteString("</")
 			buf.WriteString(tag)
 			buf.WriteString(">\n")
@@ -176,6 +196,35 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialFunc,
 // preserve.
 func trimRenderedNewline(s string) string {
 	return strings.TrimSuffix(s, "\n")
+}
+
+// loneTextChild reports whether children are a single run of text, so
+// the tag can hold it on one line: <a href="/">home</a>.
+//
+// Otherwise a tag's content starts on the line below, and the newline
+// before the closing tag is whitespace inside the element. HTML
+// collapses it to a space, which is usually nothing to look at and
+// occasionally the whole problem: inside an anchor it is a space the
+// underline runs through, past the end of the word.
+//
+// One child only. Two lines of text are two lines the author separated,
+// and joining them would close a gap that is in the source on purpose.
+// Elements, partials, and conditionals are left alone: they bring their
+// own lines, and a tag holding them reads as the block it is.
+//
+// The newline between siblings stays either way, so words in a row are
+// still words in a row -- what goes is the space inside the element,
+// which nothing was spacing.
+func loneTextChild(children []node) bool {
+	if len(children) != 1 {
+		return false
+	}
+	switch children[0].kind {
+	case kindText, kindOutput, kindTransform:
+		return true
+	default:
+		return false
+	}
 }
 
 func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {

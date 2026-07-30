@@ -48,19 +48,21 @@ func TestDoctype(t *testing.T) {
 func TestComment(t *testing.T) {
 	tu := newAssert(t)
 	got := mustRender(t, "-# this is ignored\n%p\n  hello\n", nil)
-	tu.OK(got == "<p>\nhello\n</p>\n")
+	tu.OK(got == "<p>hello</p>\n")
 }
 
 func TestStaticText(t *testing.T) {
 	tu := newAssert(t)
 	got := mustRender(t, "%p\n  hello world\n", nil)
-	tu.OK(got == "<p>\nhello world\n</p>\n")
+	tu.OK(got == "<p>hello world</p>\n")
 }
 
+// A tag holding a tag stays a block; the inner one holds its own text.
+// See TestLoneTextChildRendersInline for the rule.
 func TestTag(t *testing.T) {
 	tu := newAssert(t)
 	got := mustRender(t, "%div\n  %p\n    text\n", nil)
-	tu.OK(got == "<div>\n<p>\ntext\n</p>\n</div>\n")
+	tu.OK(got == "<div>\n<p>text</p>\n</div>\n")
 }
 
 func TestTagClassAndID(t *testing.T) {

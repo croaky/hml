@@ -129,6 +129,30 @@
 // template. A missing key or field is a render error, not an empty
 // value, so a typo fails loudly instead of rendering blank.
 //
+// # Output shape
+//
+// Each node is written on its own line, so the output reads as the tree
+// it came from. One exception, because whitespace inside an element is
+// not always free: a tag whose only child is a run of text holds it on
+// the tag's line, as <a href="/">home</a>. Left on its own line, the
+// newline before the closing tag is whitespace inside the element, which
+// HTML collapses to a space -- usually nothing to look at, but inside an
+// anchor it is a space the underline runs through, past the end of the
+// word.
+//
+// One child only. Two lines of text are two the author separated, and
+// joining them would close a gap that is in the source on purpose.
+// Elements, partials, and conditionals bring their own lines, and a tag
+// holding them stays a block. The newline between siblings never goes,
+// so words in a row are still words in a row.
+//
+// A run of text that renders as several lines -- markdown of two
+// paragraphs, say -- stays a block. The space those lines would have
+// collapsed to falls between blocks, where nothing sees it.
+//
+// A pre keeps everything: its whitespace is its content, which is why a
+// diff hunk or a terminal transcript renders inside one.
+//
 // # Secure usage
 //
 //   - Handlers own all data formatting. Templates receive pre-computed,
