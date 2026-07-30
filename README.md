@@ -44,6 +44,15 @@ receives `main` and the tags, so `go get` works and a commit hash is
 browsable, and pull requests are closed because there is nothing here to
 merge into.
 
+`main` arrives with each merge. A tag is deliberate:
+
+```sh
+scripts/tag v0.2.0
+```
+
+That pushes the tag to the module path and nowhere else. cibot has no
+use for one.
+
 ## License
 
 MIT
