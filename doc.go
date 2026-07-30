@@ -31,6 +31,17 @@
 //     The only unescaped paths are SafeString values (produced by the
 //     renderer itself: rendered partials, layout body, csrf tags) and
 //     the transform builtins, which sanitize inside the engine.
+//   - Attribute values are constrained by the context the attribute
+//     puts them in. A URL attribute (href, src, action, formaction,
+//     poster, cite, background, ping, xlink:href) takes a relative URL
+//     or one of http, https, mailto, tel; anything else renders as the
+//     sentinel #ZgotmplZ, as in html/template, so javascript:alert(1)
+//     never reaches the browser. An on* attribute is a JavaScript
+//     context and a style attribute a CSS context: each takes a string
+//     literal written in the template, which is application source, or
+//     a value the handler marked SafeJS or SafeCSS. A plain dynamic
+//     value there is a render error, because no escaping makes
+//     untrusted data safe as code.
 //   - The parser rejects anything outside the dumb subset — no method
 //     calls on data, no arbitrary code, no eval. The only callables are
 //     allowlisted helper funcs injected as locals (see Subset grammar).
@@ -40,13 +51,17 @@
 //
 // What the renderer does NOT guarantee:
 //
-//   - No context-aware escaping. Unlike Go's html/template, this
-//     renderer does not distinguish URL context (href), JavaScript
-//     context (onclick), or CSS context (style) from body text. All
-//     = output gets uniform html.EscapeString. This means it will not
-//     catch javascript:alert(1) in an href — it only escapes &<>".
-//   - SafeString is a trust assertion, not a proof. Wrap only
-//     renderer output or HTML sanitized by the producer.
+//   - No context awareness outside attribute values. = output and
+//     #{} interpolation in body text get uniform html.EscapeString.
+//     :javascript and :css filter blocks interpolate without escaping
+//     and without a trust type; that is a known gap.
+//   - Attribute rules key off the attribute name, not the value. The
+//     renderer will not tell a well-formed http URL from one pointing
+//     somewhere you did not intend, and it does not parse CSS or JS
+//     that carries a trust type.
+//   - SafeString, SafeJS, and SafeCSS are trust assertions, not
+//     proofs. Wrap only renderer output, or content the producer
+//     sanitized or built itself.
 //
 // # Transforms
 //
@@ -120,9 +135,11 @@
 //   - Use = (escaped output) everywhere. Render rich text through the
 //     transform builtins. Reserve SafeString for renderer output and
 //     producer-sanitized HTML; never wrap raw user input.
-//   - Pre-build URLs in handlers. Don't interpolate user input into
-//     href attributes — build the full URL string in Go where you can
-//     validate it.
+//   - Pre-build URLs in handlers, where you can validate them. The
+//     renderer enforces the scheme allowlist but not the destination.
+//   - Keep on* and style attributes literal. When a value must be
+//     dynamic, build it in Go and mark it SafeJS or SafeCSS, or pass
+//     the data through a data- attribute and read it from JavaScript.
 //   - :javascript filter blocks pass through without escaping. Don't
 //     interpolate user-controlled values into JS. Use data- attributes
 //     on HTML elements instead, and read them from JS.

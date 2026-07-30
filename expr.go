@@ -1075,6 +1075,12 @@ func toAttrVal(v any) string {
 		return "\x00false"
 	case string:
 		return x
+	case SafeString:
+		return string(x)
+	case SafeJS:
+		return string(x)
+	case SafeCSS:
+		return string(x)
 	case int:
 		return strconv.Itoa(x)
 	case int64:

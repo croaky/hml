@@ -101,17 +101,21 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialFunc,
 	// Sentinel values from toAttrVal: \x00true → boolean attribute,
 	// \x00false/\x00nil → omit entirely.
 	for _, a := range attrs {
-		switch a[1] {
+		switch a.val {
 		case "\x00true":
 			attrStr.WriteByte(' ')
-			attrStr.WriteString(a[0])
+			attrStr.WriteString(a.key)
 		case "\x00false", "\x00nil":
 			// omit
 		default:
+			val, err := policyAttr(a)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
 			attrStr.WriteByte(' ')
-			attrStr.WriteString(a[0])
+			attrStr.WriteString(a.key)
 			attrStr.WriteString("=\"")
-			attrStr.WriteString(escapeHTML(a[1]))
+			attrStr.WriteString(escapeHTML(val))
 			attrStr.WriteByte('"')
 		}
 	}
@@ -174,8 +178,8 @@ func trimRenderedNewline(s string) string {
 	return strings.TrimSuffix(s, "\n")
 }
 
-func buildAttrs(n node, ctx context, path string) ([][2]string, error) {
-	var result [][2]string
+func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {
+	var result []attrVal
 	shorthandClasses := n.classes
 	var attrClasses []string
 
@@ -185,13 +189,13 @@ func buildAttrs(n node, ctx context, path string) ([][2]string, error) {
 			return nil, fmt.Errorf("%s: attribute eval: %w", path, err)
 		}
 		for _, p := range pairs {
-			if p[0] == "class" {
+			if p.key == "class" {
 				// Omit nil/false/empty class values so conditional
 				// classes don't leave sentinels or stray spaces.
-				if p[1] == "\x00true" || p[1] == "\x00false" || p[1] == "\x00nil" || p[1] == "" {
+				if p.val == "\x00true" || p.val == "\x00false" || p.val == "\x00nil" || p.val == "" {
 					continue
 				}
-				attrClasses = append(attrClasses, p[1])
+				attrClasses = append(attrClasses, p.val)
 			} else {
 				result = append(result, p)
 			}
@@ -200,17 +204,98 @@ func buildAttrs(n node, ctx context, path string) ([][2]string, error) {
 
 	allClasses := append(shorthandClasses, attrClasses...)
 	if len(allClasses) > 0 {
-		result = append(result, [2]string{"class", strings.Join(allClasses, " ")})
+		result = append(result, attrVal{key: "class", val: strings.Join(allClasses, " "), literal: true})
 	}
 
 	if n.id != "" {
-		result = append(result, [2]string{"id", n.id})
+		result = append(result, attrVal{key: "id", val: n.id, literal: true})
 	}
 
 	// Sort alphabetically by key for stable output
 	sortAttrs(result)
 
 	return result, nil
+}
+
+// urlAttrs are the attributes a browser fetches or navigates to. Their
+// values are URLs, so a scheme in them is code, not text.
+var urlAttrs = map[string]bool{
+	"href": true, "src": true, "action": true, "formaction": true,
+	"poster": true, "cite": true, "background": true, "ping": true,
+	"xlink:href": true,
+}
+
+// urlSchemes is the allowlist for absolute URLs. Everything else —
+// javascript:, data:, vbscript:, and any scheme nobody has thought of —
+// is rejected.
+var urlSchemes = map[string]bool{
+	"http": true, "https": true, "mailto": true, "tel": true,
+}
+
+// unsafeURL replaces a rejected URL. It is a sentinel, not a link
+// target: the name matches html/template so the two engines fail the
+// same way and the string is greppable in rendered output.
+const unsafeURL = "#ZgotmplZ"
+
+// policyAttr constrains a value by the context its attribute puts it in.
+// hml needs no HTML state machine for this the way html/template does:
+// the renderer holds the attribute name and the value together, so it
+// can decide per attribute.
+//
+// URL attributes take only relative URLs and an allowlisted scheme. on*
+// and style attributes are code, so they take a literal written in the
+// template — that is application source — or a value the handler marked
+// SafeJS or SafeCSS. A plain dynamic value in either is an error rather
+// than an escape, because there is no escaping that makes untrusted data
+// safe as code.
+func policyAttr(a attrVal) (string, error) {
+	name := strings.ToLower(a.key)
+	switch {
+	case urlAttrs[name]:
+		if !safeURL(a.val) {
+			return unsafeURL, nil
+		}
+	case strings.HasPrefix(name, "on"):
+		if !a.literal && a.trust != trustJS {
+			return "", fmt.Errorf("attribute %s: dynamic value in a JavaScript context requires hml.SafeJS", a.key)
+		}
+	case name == "style":
+		if !a.literal && a.trust != trustCSS {
+			return "", fmt.Errorf("attribute %s: dynamic value in a CSS context requires hml.SafeCSS", a.key)
+		}
+	}
+	return a.val, nil
+}
+
+// safeURL reports whether s is a relative URL or carries an allowlisted
+// scheme. Control characters and spaces are dropped before the scheme is
+// read, because browsers drop them too: "java\tscript:" navigates.
+func safeURL(s string) bool {
+	s = strings.Map(func(r rune) rune {
+		if r <= ' ' || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ':' {
+			// A scheme must be a non-empty run of scheme
+			// characters; "foo/bar:baz" never reaches here.
+			return i > 0 && urlSchemes[strings.ToLower(s[:i])]
+		}
+		if !isSchemeChar(c) {
+			// No scheme: a path, query, fragment, or
+			// interpolated value. Relative URLs are safe.
+			return true
+		}
+	}
+	return true
+}
+
+func isSchemeChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'
 }
 
 func renderConditional(chain []node, buf *strings.Builder, ctx context, partialFn PartialFunc, path string) error {
@@ -364,27 +449,27 @@ func stringify(v any) string {
 	}
 }
 
-func sortAttrs(result [][2]string) {
+func sortAttrs(result []attrVal) {
 	switch len(result) {
 	case 0, 1:
 		// already sorted
 	case 2:
-		if result[0][0] > result[1][0] {
+		if result[0].key > result[1].key {
 			result[0], result[1] = result[1], result[0]
 		}
 	case 3:
-		if result[0][0] > result[1][0] {
+		if result[0].key > result[1].key {
 			result[0], result[1] = result[1], result[0]
 		}
-		if result[1][0] > result[2][0] {
+		if result[1].key > result[2].key {
 			result[1], result[2] = result[2], result[1]
 		}
-		if result[0][0] > result[1][0] {
+		if result[0].key > result[1].key {
 			result[0], result[1] = result[1], result[0]
 		}
 	default:
 		sort.Slice(result, func(i, j int) bool {
-			return result[i][0] < result[j][0]
+			return result[i].key < result[j].key
 		})
 	}
 }

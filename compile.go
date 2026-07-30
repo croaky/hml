@@ -270,11 +270,31 @@ func evalInterp(segs []interpSeg, ctx context, escape bool) (string, error) {
 	return buf.String(), nil
 }
 
+// attrVal is one evaluated attribute, plus the provenance the attribute
+// policy needs (see policyAttr): whether the value was written as a plain
+// string literal in the template — authored source, not data — and which
+// trust type, if any, the value carried.
+type attrVal struct {
+	key     string
+	val     string
+	literal bool
+	trust   trust
+}
+
+// trust records a SafeJS/SafeCSS assertion made by the handler.
+type trust int
+
+const (
+	trustNone trust = iota
+	trustJS
+	trustCSS
+)
+
 // evalAttrs evaluates compiled attribute pairs into stringified
 // key/value pairs. It matches the eval half of the old parseHash,
 // including splat expansion and toAttrVal sentinel encoding.
-func evalAttrs(attrs []attr, ctx context) ([][2]string, error) {
-	var result [][2]string
+func evalAttrs(attrs []attr, ctx context) ([]attrVal, error) {
+	var result []attrVal
 	for _, a := range attrs {
 		val, err := evaluate(a.val, ctx)
 		if err != nil {
@@ -286,13 +306,28 @@ func evalAttrs(attrs []attr, ctx context) ([][2]string, error) {
 				return nil, fmt.Errorf("splat requires a map, got %T", val)
 			}
 			for k, v := range m {
-				result = append(result, [2]string{k, toAttrVal(v)})
+				result = append(result, attrVal{key: k, val: toAttrVal(v), trust: valTrust(v)})
 			}
 			continue
 		}
-		result = append(result, [2]string{a.key, toAttrVal(val)})
+		result = append(result, attrVal{
+			key:     a.key,
+			val:     toAttrVal(val),
+			literal: a.val.typ == astString,
+			trust:   valTrust(val),
+		})
 	}
 	return result, nil
+}
+
+func valTrust(v any) trust {
+	switch v.(type) {
+	case SafeJS:
+		return trustJS
+	case SafeCSS:
+		return trustCSS
+	}
+	return trustNone
 }
 
 // evalLocals evaluates compiled render args into a typed locals map,

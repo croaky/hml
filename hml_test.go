@@ -528,7 +528,7 @@ func TestEntityHeaderTemplate(t *testing.T) {
   %tr
     %td{ style: "vertical-align:middle;padding:0 8px 0 0;" }
       %a{ href: url }
-        %img{ src: image_url, width: "32", height: "32", style: "border-radius:#{image_radius};display:block;" }
+        %img{ src: image_url, width: "32", height: "32", style: avatar_style }
     %td{ style: "vertical-align:middle;" }
       %a{ href: url, style: "font-weight:bold;" }
         = name
@@ -542,9 +542,11 @@ func TestEntityHeaderTemplate(t *testing.T) {
           = ceo_name
 `
 	locals := map[string]any{
-		"url":            "https://example.com/co/1",
-		"image_url":      "https://img.example.com/logo.png",
-		"image_radius":   "4px",
+		"url":       "https://example.com/co/1",
+		"image_url": "https://img.example.com/logo.png",
+		// A style built in Go, marked SafeCSS: the CSS context
+		// takes no plain dynamic value.
+		"avatar_style":   SafeCSS("border-radius:4px;display:block;"),
 		"name":           "Acme Corp",
 		"has_ceo":        true,
 		"ceo_url":        "https://example.com/people/5",
@@ -555,6 +557,86 @@ func TestEntityHeaderTemplate(t *testing.T) {
 	tu.OK(strings.Contains(got, "Acme Corp"))
 	tu.OK(strings.Contains(got, "Jane Doe"))
 	tu.OK(strings.Contains(got, "border-radius:4px"))
+}
+
+// #ZgotmplZ is a sentinel, not a link target: it marks a URL the
+// renderer refused, and matches what html/template emits.
+func TestURLAttributeRejectsUnsafeScheme(t *testing.T) {
+	tu := newAssert(t)
+	for _, url := range []string{
+		"javascript:alert(1)",
+		"JaVaScRiPt:alert(1)",
+		"java\tscript:alert(1)",
+		" javascript:alert(1)",
+		"data:text/html,<script>alert(1)</script>",
+		"vbscript:msgbox",
+	} {
+		got := mustRender(t, "%a{ href: u }\n  x\n", map[string]any{"u": url})
+		tu.OK(strings.Contains(got, `href="#ZgotmplZ"`))
+		tu.OK(!strings.Contains(got, "alert"))
+	}
+
+	// Every URL attribute, not just href.
+	got := mustRender(t, "%img{ src: u }\n", map[string]any{"u": "javascript:alert(1)"})
+	tu.OK(strings.Contains(got, `src="#ZgotmplZ"`))
+}
+
+func TestURLAttributeAllowsRelativeAndAllowlistedSchemes(t *testing.T) {
+	tu := newAssert(t)
+	for _, url := range []string{
+		"/change/CI-1",
+		"#x",
+		"?q=1",
+		"change/CI-1",
+		"//example.com/logo.png",
+		"https://example.com",
+		"http://example.com",
+		"mailto:a@example.com",
+		"tel:+15555555555",
+	} {
+		got := mustRender(t, "%a{ href: u }\n  x\n", map[string]any{"u": url})
+		tu.OK(strings.Contains(got, `href="`+url+`"`))
+	}
+}
+
+// An on* attribute is a JavaScript context. A literal is application
+// source and passes; data is not code, so it needs SafeJS.
+func TestJSAttributeRequiresLiteralOrSafeJS(t *testing.T) {
+	tu := newAssert(t)
+
+	got := mustRender(t, `%button{ onclick: "APP.close()" }`+"\n  x\n", nil)
+	tu.OK(strings.Contains(got, `onclick="APP.close()"`))
+
+	tmpl := mustParse(t, "%button{ onclick: handler }\n  x\n")
+	_, err := tmpl.Render(map[string]any{"handler": "APP.close()"}, nil)
+	tu.OK(err != nil)
+	tu.OK(strings.Contains(err.Error(), "SafeJS"))
+
+	got, err = tmpl.Render(map[string]any{"handler": SafeJS("APP.close()")}, nil)
+	tu.OK(err == nil)
+	tu.OK(strings.Contains(got, `onclick="APP.close()"`))
+
+	// Interpolation is not a literal, however much of it is authored.
+	tmpl = mustParse(t, "%img{ onerror: \"hide(#{id})\" }\n")
+	_, err = tmpl.Render(map[string]any{"id": int64(1)}, nil)
+	tu.OK(err != nil)
+	tu.OK(strings.Contains(err.Error(), "SafeJS"))
+}
+
+func TestStyleAttributeRequiresLiteralOrSafeCSS(t *testing.T) {
+	tu := newAssert(t)
+
+	got := mustRender(t, `%p{ style: "white-space: pre-wrap" }`+"\n  x\n", nil)
+	tu.OK(strings.Contains(got, `style="white-space: pre-wrap"`))
+
+	tmpl := mustParse(t, "%p{ style: css }\n  x\n")
+	_, err := tmpl.Render(map[string]any{"css": "width:50%"}, nil)
+	tu.OK(err != nil)
+	tu.OK(strings.Contains(err.Error(), "SafeCSS"))
+
+	got, err = tmpl.Render(map[string]any{"css": SafeCSS("width:50%")}, nil)
+	tu.OK(err == nil)
+	tu.OK(strings.Contains(got, `style="width:50%"`))
 }
 
 // Transform rendering behavior (markdown/slack/search_highlight output)
