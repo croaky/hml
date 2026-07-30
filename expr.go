@@ -991,10 +991,16 @@ func structFieldIndex(rt reflect.Type, name string) (int, bool) {
 // buildFieldIndex maps every name a template might use (lower-cased field
 // name, json tag, db tag) to that field's index. Earlier fields win on
 // collision, matching the original first-match-wins scan order.
+// Unexported fields are left out: reflect.Value.Interface panics on one, so
+// indexing it would turn a template typo into a dead handler. Out of the
+// index, the name misses and evalField reports an undefined field instead.
 func buildFieldIndex(rt reflect.Type) map[string]int {
 	m := make(map[string]int)
 	for i := 0; i < rt.NumField(); i++ {
 		field := rt.Field(i)
+		if !field.IsExported() {
+			continue
+		}
 		if _, ok := m[strings.ToLower(field.Name)]; !ok {
 			m[strings.ToLower(field.Name)] = i
 		}

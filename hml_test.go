@@ -349,6 +349,27 @@ func TestUndefinedVariable(t *testing.T) {
 	tu.OK(err != nil)
 }
 
+// fieldHolder stands in for any struct an app hands a template: a
+// field the template may read and one it may not.
+type fieldHolder struct {
+	Name string
+	vars map[string]any
+}
+
+func TestUnexportedFieldIsRenderError(t *testing.T) {
+	tu := newAssert(t)
+	tmpl := mustParse(t, "= data.vars\n")
+	_, err := tmpl.Render(map[string]any{"data": fieldHolder{vars: map[string]any{}}}, nil)
+	tu.OK(err != nil)
+	tu.OK(strings.Contains(err.Error(), "undefined field"))
+}
+
+func TestExportedFieldStillReadable(t *testing.T) {
+	tu := newAssert(t)
+	got := mustRender(t, "= data.name\n", map[string]any{"data": fieldHolder{Name: "Alice"}})
+	tu.OK(got == "Alice\n")
+}
+
 func TestMailReminderTemplate(t *testing.T) {
 	tu := newAssert(t)
 	src := `= header_html
