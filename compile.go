@@ -69,7 +69,7 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 				return fmt.Errorf("%s: transform %q: %w", path, n.expr, err)
 			}
 			n.exprAST = ast
-		case kindIf, kindElsif, kindFor:
+		case kindIf, kindElseIf, kindFor:
 			ast, err := compileExpr(n.expr)
 			if err != nil {
 				return fmt.Errorf("%s: expression %q: %w", path, n.expr, err)
@@ -116,10 +116,10 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 // whose type only the handler knows; this catches the ones the AST
 // already settles, at Parse, where the parser is the linter.
 //
-// The point is the branch nobody exercises. `- elsif title || "Untitled"`
-// is wrong the moment it is written, but a render-time check reports it
-// only when that branch is reached -- which, for an elsif, may be in
-// production and not in a test.
+// The point is the branch nobody exercises. `- else if title ||
+// "Untitled"` is wrong the moment it is written, but a render-time
+// check reports it only when that branch is reached -- which, for an
+// else if, may be in production and not in a test.
 //
 // && and || return an operand, so either side can be the value the
 // condition sees and both are checked. ! and a comparison always yield a

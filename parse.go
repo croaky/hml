@@ -131,7 +131,7 @@ func parseLine(stripped string, indent int, lines []string, childFrom, childTo i
 		return node{kind: kindFilter, filterName: name, filterLines: filterLines, indent: indent}, nil
 	}
 
-	// Control: - if / - elsif / - else / - for ... in
+	// Control: - if / - else if / - else / - for ... in
 	if strings.HasPrefix(stripped, "- ") {
 		control := strings.TrimSpace(stripped[2:])
 		if strings.HasPrefix(control, "if ") {
@@ -141,12 +141,12 @@ func parseLine(stripped string, indent int, lines []string, childFrom, childTo i
 			}
 			return node{kind: kindIf, expr: control[3:], indent: indent, children: children}, nil
 		}
-		if strings.HasPrefix(control, "elsif ") {
+		if strings.HasPrefix(control, "else if ") {
 			children, err := parseLines(lines, indent+2, childFrom, childTo, path)
 			if err != nil {
 				return node{}, err
 			}
-			return node{kind: kindElsif, expr: control[6:], indent: indent, children: children}, nil
+			return node{kind: kindElseIf, expr: control[8:], indent: indent, children: children}, nil
 		}
 		if control == "else" {
 			children, err := parseLines(lines, indent+2, childFrom, childTo, path)

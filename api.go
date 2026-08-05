@@ -125,7 +125,7 @@ func (w *nameWalk) walkNodes(nodes []node) {
 			for _, segs := range n.filterSegs {
 				w.walkInterp(segs)
 			}
-		case kindOutput, kindTransform, kindIf, kindElsif:
+		case kindOutput, kindTransform, kindIf, kindElseIf:
 			w.walkExpr(n.exprAST)
 		case kindTag:
 			for _, a := range n.attrs {
@@ -266,7 +266,7 @@ const (
 	kindTag
 	kindFilter // :javascript, :css
 	kindIf
-	kindElsif
+	kindElseIf
 	kindElse
 	kindFor
 	kindRender    // = render "partial", key: val
@@ -279,7 +279,7 @@ type node struct {
 	indent      int
 	line        int      // 1-based source line, for error messages
 	text        string   // for text, output, render expr
-	expr        string   // if/elsif condition, for collection
+	expr        string   // if/else if condition, for collection
 	callName    string   // for kindCall: the name before the parens
 	tag         string   // for tag
 	classes     []string // for tag
@@ -292,7 +292,7 @@ type node struct {
 	children    []node
 
 	// Compiled at Parse time by compileNodes; consumed by Render.
-	exprAST    *astNode      // if/elsif condition, for collection, output, transform
+	exprAST    *astNode      // if/else if condition, for collection, output, transform
 	transform  Transform     // resolved rich-text builtin (kindTransform)
 	attrs      []attr        // tag attribute hash
 	textSegs   []interpSeg   // static text interpolation

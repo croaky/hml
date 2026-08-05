@@ -108,7 +108,7 @@
 // rules. They are documented here so the language has one specification
 // rather than behavior discovered per template.
 //
-// Conditions (- if, - elsif, !): the value must be a bool. Anything else
+// Conditions (- if, - else if, !): the value must be a bool. Anything else
 // is an error naming the view, the line, the condition, and the type —
 // at Parse when the expression settles it (- if "x", - if title ||
 // "Untitled"), at Render otherwise. There is no implicit truthiness to
@@ -220,7 +220,7 @@
 //	                                argument is one field access)
 //	= helper(a, b)                  allowlisted helper call, in output or
 //	                                in an attribute value
-//	- if expr / - elsif / - else    conditionals
+//	- if expr / - else if / - else  conditionals
 //	- for item in items             loops (optional index: for i, item)
 //	= render "name", key: val       partials
 //	= helper arg, key: val          allowlisted helper calls (Go funcs

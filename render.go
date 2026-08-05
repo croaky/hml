@@ -70,9 +70,9 @@ func renderNodes(nodes []node, buf *strings.Builder, ctx context, partialFn Part
 				return err
 			}
 		case kindIf:
-			// collect if/elsif/else chain
+			// collect if/else if/else chain
 			chain := []node{n}
-			for i+1 < len(nodes) && (nodes[i+1].kind == kindElsif || nodes[i+1].kind == kindElse) {
+			for i+1 < len(nodes) && (nodes[i+1].kind == kindElseIf || nodes[i+1].kind == kindElse) {
 				i++
 				chain = append(chain, nodes[i])
 			}
@@ -371,7 +371,7 @@ func isSchemeChar(c byte) bool {
 func renderConditional(chain []node, buf *strings.Builder, ctx context, partialFn PartialFunc, path string) error {
 	for _, n := range chain {
 		switch n.kind {
-		case kindIf, kindElsif:
+		case kindIf, kindElseIf:
 			val, err := evaluate(n.exprAST, ctx)
 			if err != nil {
 				return fmt.Errorf("%s:%d: condition eval %q: %w", path, n.line, n.expr, err)

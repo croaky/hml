@@ -187,9 +187,9 @@ func TestIfElse(t *testing.T) {
 	tu.OK(got == "no\n")
 }
 
-func TestIfElsif(t *testing.T) {
+func TestIfElseIf(t *testing.T) {
 	tu := newAssert(t)
-	src := "- if a\n  first\n- elsif b\n  second\n- else\n  third\n"
+	src := "- if a\n  first\n- else if b\n  second\n- else\n  third\n"
 	got := mustRender(t, src, map[string]any{"a": false, "b": true})
 	tu.OK(got == "second\n")
 }
@@ -497,8 +497,8 @@ func TestConditionRequiresBool(t *testing.T) {
 		tu.OK(strings.Contains(err.Error(), `"title"`))
 	}
 
-	// An elsif is held to the same rule, and only when it is reached.
-	tmpl := mustParse(t, "- if a\n  x\n- elsif title\n  y\n")
+	// An else if is held to the same rule, and only when it is reached.
+	tmpl := mustParse(t, "- if a\n  x\n- else if title\n  y\n")
 	_, err := tmpl.Render(map[string]any{"a": true, "title": "t"}, nil)
 	tu.OK(err == nil)
 	_, err = tmpl.Render(map[string]any{"a": false, "title": "t"}, nil)
@@ -536,7 +536,7 @@ func TestLiteralConditionRejectedAtParse(t *testing.T) {
 		"- if 1\n  y\n",
 		"- if nil\n  y\n",
 		"- if title || \"Untitled\"\n  y\n",
-		"- if a\n  y\n- elsif \"x\"\n  z\n",
+		"- if a\n  y\n- else if \"x\"\n  z\n",
 	} {
 		_, err := Parse(src, "test.hml", nil)
 		tu.OK(err != nil)
@@ -602,11 +602,15 @@ func TestTypedSliceFor(t *testing.T) {
 	tu.OK(got == "a\nb\n")
 }
 
-func TestElseIfRejected(t *testing.T) {
+// - else if is one control, not an - else holding a nested - if: the
+// chain walker only continues across siblings, so a parse that nested
+// would put the branch out of its reach and the else would always win.
+func TestElseIfIsOneControl(t *testing.T) {
 	tu := newAssert(t)
-	src := "- if a\n  yes\n- else if b\n  no\n"
-	_, err := Parse(src, "test.hml", nil)
-	tu.OK(err != nil)
+	src := "- if a\n  first\n- else if b\n  second\n- else\n  third\n"
+	tu.OK(mustRender(t, src, map[string]any{"a": true, "b": true}) == "first\n")
+	tu.OK(mustRender(t, src, map[string]any{"a": false, "b": true}) == "second\n")
+	tu.OK(mustRender(t, src, map[string]any{"a": false, "b": false}) == "third\n")
 }
 
 func TestSplatBooleanAttributes(t *testing.T) {
@@ -887,7 +891,7 @@ func TestNamesCoversEveryExpressionSite(t *testing.T) {
 		"  text #{caption} more\n" +
 		"- if flag\n" +
 		"  = title\n" +
-		"- elsif other\n" +
+		"- else if other\n" +
 		"  = markdown(body)\n" +
 		"- for row in rows\n" +
 		"  = render \"card\", user: person\n" +
