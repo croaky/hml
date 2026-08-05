@@ -16,3 +16,10 @@ lint: out=$(goimports -local "$(go list -m)" -l .); if [ -n "$out" ]; then echo 
 # its output is the verdict: awk prints what it read, then fails if it
 # read a line.
 hints: git ls-files -z '*.go' | xargs -0 gopls check -severity=hint | awk '1; END { exit (NR > 0) }'
+
+# The C is generated and not committed, so generate is the check: a
+# grammar.js the CLI cannot build is a grammar nobody can install.
+# `test` then compiles that parser and runs the corpus, which is why it
+# needs a C compiler as well as the CLI. Both come from
+# cibot's scripts/provision-vm-workers.sh.
+grammar: tree-sitter generate && tree-sitter test

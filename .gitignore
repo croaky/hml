@@ -1,0 +1,11 @@
+# `tree-sitter generate` writes these from grammar.js, and
+# `tree-sitter build` writes the shared library from them, named for the
+# platform it ran on. Both users of this grammar install the CLI, so the
+# generated C stays out of the tree.
+parser.dll
+parser.dylib
+parser.so
+src/grammar.json
+src/node-types.json
+src/parser.c
+src/tree_sitter/

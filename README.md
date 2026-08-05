@@ -49,6 +49,13 @@ transforms := map[string]hml.Transform{
 Unregistered names are parse errors, so the parser stays the linter.
 The engine itself is stdlib-only.
 
+## Editors
+
+This repo is also a tree-sitter grammar: `grammar.js`, an external
+scanner for indentation, and highlight and injection queries under
+`queries/`. The parser itself is not committed; `tree-sitter generate`
+writes it, and nvim-treesitter runs that at install time.
+
 ## GitHub repo is a mirror
 
 Development happens on [cibot](https://dancroak.com/cmd/cibot/), a

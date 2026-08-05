@@ -1,0 +1,147 @@
+==================
+Doctype and a tag
+==================
+
+!!!
+%p
+
+---
+
+(source_file
+  (doctype)
+  (element
+    (tag_name)))
+
+==================
+Nesting by indent
+==================
+
+%div
+  %p
+    %span
+  %p
+
+---
+
+(source_file
+  (element
+    (tag_name)
+    (element
+      (tag_name)
+      (element
+        (tag_name)))
+    (element
+      (tag_name))))
+
+==================
+Shorthands
+==================
+
+%p.note#lead
+.wrapper
+#main.inner
+
+---
+
+(source_file
+  (element
+    (tag_name)
+    (class)
+    (id))
+  (element
+    (class))
+  (element
+    (id)
+    (class)))
+
+==================
+A class on the next line is its own element
+==================
+
+%p
+.note
+
+---
+
+(source_file
+  (element
+    (tag_name))
+  (element
+    (class)))
+
+==================
+Attributes
+==================
+
+%a{href: "/", class: title, "data-id": 1}
+%img{**attrs}
+
+---
+
+(source_file
+  (element
+    (tag_name)
+    (attributes
+      (attribute
+        (identifier)
+        (string
+          (string_content)))
+      (attribute
+        (identifier)
+        (identifier))
+      (attribute
+        (string
+          (string_content))
+        (number))))
+  (element
+    (tag_name)
+    (attributes
+      (splat
+        (identifier)))))
+
+==================
+Attributes over several lines
+==================
+
+%a{
+  href: "/",
+  title: "home",
+}
+  = label
+
+---
+
+(source_file
+  (element
+    (tag_name)
+    (attributes
+      (attribute
+        (identifier)
+        (string
+          (string_content)))
+      (attribute
+        (identifier)
+        (string
+          (string_content))))
+    (output
+      (identifier))))
+
+==================
+Text and interpolation
+==================
+
+Hello #{user.name}, welcome.
+plain
+
+---
+
+(source_file
+  (text
+    (text_chunk)
+    (interpolation
+      (field_access
+        (identifier)
+        (identifier)))
+    (text_chunk))
+  (text
+    (text_chunk)))

@@ -22,6 +22,56 @@ its own file:
 `Names`, `Renders`, and the `Safe*` types. `doc.go` is documentation
 only.
 
+## Grammar
+
+Alongside the Go package, a tree-sitter grammar so editors can
+highlight `.hml` rather than pretending it is HAML:
+
+- `grammar.js` — the same language `doc.go` describes, in tree-sitter's
+  DSL. Expression precedence mirrors `expr.go`.
+- `src/scanner.c` — an external scanner emitting INDENT and DEDENT, and
+  reading a filter or comment body as one opaque token.
+- `queries/highlights.scm`, `queries/injections.scm` — the latter hands
+  `:javascript` and `:css` bodies to those languages.
+- `test/corpus/` — `tree-sitter test` cases.
+
+`grammar.js` and `src/scanner.c` are the source. `src/parser.c`,
+`src/grammar.json`, `src/node-types.json`, and `src/tree_sitter/` are
+what the CLI writes from them, and are ignored rather than committed.
+Most grammars commit that C because their users are compiling it
+without a CLI to hand; both users here install `tree-sitter-cli` from
+`~/laptop`, so a 15,000-line generated file in the tree would buy
+nothing and go stale. nvim-treesitter generates at install time
+(`generate = true`, `generate_from_json = false` in `vim/init.lua`),
+which also builds against the ABI that nvim speaks.
+
+After a `grammar.js` change:
+
+```sh
+tree-sitter generate
+tree-sitter test
+```
+
+`generate` first, always: `tree-sitter test` reads `src/grammar.json`
+and fails without it. That ordering is why the `grammar` job runs both
+rather than just the second: with no C in the tree, a `grammar.js` the
+CLI cannot build is a grammar nobody can install, and generating is
+what catches it.
+
+The job needs the CLI and a C compiler on the worker, installed by
+cibot's `scripts/provision-vm-workers.sh`.
+
+Whether an example is hml at all is a different question, and the
+CLI cannot answer it. `corpus_test.go` reads every
+`test/corpus/*.txt` source and hands it to `Parse`, which needs no CLI
+and runs in CI with the rest. Without it a corpus case can describe a
+language the engine rejects, and the grammar passes its own tests
+saying so.
+
+What the grammar highlights is the shape of a call, not a list of
+names. Transforms and helpers are registered by the app, so a fixed
+list would be wrong in every repo but one.
+
 ## Checks
 
 The root `Checkfile` is the list, and CI runs it on every push. Run the
@@ -91,7 +141,8 @@ than leaving a record of work already done.
 ## Commits
 
 - Prefix with the stage the change acts on: `parse:`, `compile:`,
-  `expr:`, `render:`, `api:`, `doc:`, `test:`, `todo:`, `ci:`. Not
+  `expr:`, `render:`, `api:`, `doc:`, `test:`, `todo:`, `ci:`,
+  `grammar:` for the tree-sitter files. Not
   `hml:` — every commit here is hml, so it says nothing.
 - A change touching several stages takes the one whose behavior
   changed, not the one with the most lines.
@@ -120,7 +171,7 @@ breaking release so far has been sized wrong until this was run.
 Bump each user in the same sitting. Two versions of the engine in use at
 once means the next change has to reason about both.
 
-A pre-1.0 library with two known users can keep constraining what used
-to pass, but the cheapness depends on knowing every user. If a third
-appears, the next constraint needs a deprecation path rather than an
-afternoon.
+There are three users now: blog joined when its pages became `.hml`.
+That is the condition this section named as the end of the cheap
+breaking change, so the next constraint needs a deprecation path rather
+than an afternoon of bumping callers.

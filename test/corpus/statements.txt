@@ -1,0 +1,219 @@
+==================
+Escaped output
+==================
+
+= title
+= post.author.name
+
+---
+
+(source_file
+  (output
+    (identifier))
+  (output
+    (field_access
+      (field_access
+        (identifier)
+        (identifier))
+      (identifier))))
+
+==================
+Calls
+==================
+
+= markdown(post.body)
+= commit_url(id, sha)
+= avatar_src user, size: 24
+
+---
+
+(source_file
+  (output
+    (call
+      (identifier)
+      (field_access
+        (identifier)
+        (identifier))))
+  (output
+    (call
+      (identifier)
+      (identifier)
+      (identifier)))
+  (output
+    (bare_call
+      (identifier)
+      (identifier)
+      (keyword_argument
+        (identifier)
+        (number)))))
+
+==================
+Partials
+==================
+
+= render "help/sidebar"
+= render "row", item: item, **rest
+
+---
+
+(source_file
+  (output
+    (partial
+      (string
+        (string_content))))
+  (output
+    (partial
+      (string
+        (string_content))
+      (attribute
+        (identifier)
+        (identifier))
+      (splat
+        (identifier)))))
+
+==================
+Conditionals
+==================
+
+- if user.admin
+  %p
+- else if count > 0
+  %p
+- else
+  %p
+
+---
+
+(source_file
+  (conditional
+    (if_clause
+      (field_access
+        (identifier)
+        (identifier))
+      (element
+        (tag_name)))
+    (else_if_clause
+      (binary_expression
+        (identifier)
+        (number))
+      (element
+        (tag_name)))
+    (else_clause
+      (element
+        (tag_name)))))
+
+==================
+Conditional operators
+==================
+
+- if !done && (a == b || c != nil)
+  %p
+
+---
+
+(source_file
+  (conditional
+    (if_clause
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (parenthesized_expression
+          (binary_expression
+            (binary_expression
+              (identifier)
+              (identifier))
+            (binary_expression
+              (identifier)
+              (nil)))))
+      (element
+        (tag_name)))))
+
+==================
+Loops
+==================
+
+- for item in items
+  %li
+- for i, item in items
+  %li
+
+---
+
+(source_file
+  (loop
+    (identifier)
+    (identifier)
+    (element
+      (tag_name)))
+  (loop
+    (identifier)
+    (identifier)
+    (identifier)
+    (element
+      (tag_name))))
+
+==================
+Filters
+==================
+
+:javascript
+  const a = 1;
+  console.log(a);
+:css
+  .a { color: red; }
+%p
+
+---
+
+(source_file
+  (filter
+    (filter_name)
+    (filter_body))
+  (filter
+    (filter_name)
+    (filter_body))
+  (element
+    (tag_name)))
+
+==================
+Comments
+==================
+
+-# a note
+-#
+  dropped entirely
+  by the engine
+%p
+
+---
+
+(source_file
+  (comment)
+  (comment
+    (comment_body))
+  (element
+    (tag_name)))
+
+==================
+Dedent to the top after a deep block
+==================
+
+%div
+  %div
+    %div
+      %p
+%footer
+
+---
+
+(source_file
+  (element
+    (tag_name)
+    (element
+      (tag_name)
+      (element
+        (tag_name)
+        (element
+          (tag_name)))))
+  (element
+    (tag_name)))
