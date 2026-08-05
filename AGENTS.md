@@ -6,8 +6,8 @@ security model.
 
 ## Architecture
 
-One package at the repo root, standard library only. Source moves
-through four stages, each its own file:
+One package at the repo root. Source moves through four stages, each
+its own file:
 
 - `parse.go` — lines and indentation to a `[]node` tree. Knows nothing
   about expressions.
@@ -31,21 +31,42 @@ there:
 ```sh
 goimports -local "$(go list -m)" -w .
 go vet ./...
-go test -race -cover ./...
+go test -trimpath -race -cover ./...
 git ls-files -z '*.go' | xargs -0 gopls check -severity=hint
 ```
 
 The local `goimports` writes; the `lint` job only reports, because a CI
 job that rewrites source has nowhere to put it.
 
-Nothing outside the standard library is imported. Taking a dependency is
-a design decision, not a step.
+The engine imports nothing outside the standard library, and that is the
+point of it: an app embeds hml to render pages, and a template language
+that drags a graph in behind it is a worse trade than writing the parser.
+Taking a dependency for `parse.go`, `compile.go`, `expr.go`, or
+`render.go` is a design decision, not a step.
+
+A test-only import is the stated exception, and there is one:
+`github.com/croaky/is`. It stays out of a consumer's build entirely,
+since module graph pruning does not load a dependency's test
+requirements, so what it costs is a line in this `go.mod` rather than
+anything an app links. What it buys is the assertions being the same
+ones the other repos here run, and one fix rather than four: the copy
+this replaced read the caller's source the obvious way, which returns a
+path that will not open under the `-trimpath` the `test` job passes, so
+every failure in CI said `assertion failed` and nothing else.
 
 ## Tests
 
 Red/green TDD. Test files are named for their topic: `hml_test.go` for
 the language, `lonetext_test.go` for output shape, `perf_bench_test.go`
-for benchmarks, `assert_test.go` for helpers.
+for benchmarks.
+
+Assertions are `github.com/croaky/is`, one `is := is.New(t)` per test.
+Pick the helper that names what you assert, so a failure prints both
+values: `Eq` and `NotEq` for two values, which is the default; `NoErr`
+and `HasErr` for errors; `Nil` and `NotNil` for nil checks; `True` only
+for a predicate with no want to name. `True(got == want)` compiles and
+is still wrong. `Eq` takes `any`, so type the literal when the value
+under test is not the literal's default type: `Eq(gotInt64, int64(3))`.
 
 - A rejection needs two tests: that the value is refused, and that the
   legitimate form still renders. A policy that only rejects is one
@@ -70,8 +91,8 @@ than leaving a record of work already done.
 ## Commits
 
 - Prefix with the stage the change acts on: `parse:`, `compile:`,
-  `expr:`, `render:`, `api:`, `doc:`, `todo:`, `ci:`. Not `hml:` —
-  every commit here is hml, so it says nothing.
+  `expr:`, `render:`, `api:`, `doc:`, `test:`, `todo:`, `ci:`. Not
+  `hml:` — every commit here is hml, so it says nothing.
 - A change touching several stages takes the one whose behavior
   changed, not the one with the most lines.
 - Imperative mood, lowercase except proper nouns. Hard-wrap at 72.

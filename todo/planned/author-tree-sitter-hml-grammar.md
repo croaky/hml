@@ -1,8 +1,8 @@
 # Author a tree-sitter grammar for hml
 
-EDS and cibot render from `.hml`. What's left is honest highlighting:
-editors still have no grammar for the language, which is why the files
-were named `.haml` in the first place.
+Apps render from `.hml` in production. What's left is honest
+highlighting: editors still have no grammar for the language, which is
+why the files were named `.haml` in the first place.
 
 ## Grammar
 

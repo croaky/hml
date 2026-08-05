@@ -3,6 +3,8 @@ package hml
 import (
 	"strings"
 	"testing"
+
+	"github.com/croaky/is"
 )
 
 // partialFor renders one named partial against the context it is handed,
@@ -12,94 +14,95 @@ func partialFor(t *testing.T, name, src string) PartialFunc {
 	t.Helper()
 	inner := mustParse(t, src)
 	return func(got string, ctx *Context) (string, error) {
-		tu := newAssert(t)
-		tu.OK(got == name)
+		is := is.New(t)
+		is.Eq(got, name)
 		return inner.RenderContext(ctx, nil)
 	}
 }
 
 // The change exists for this: a handler a person typed, passed to a
-// partial in a hash and splatted onto the tag there. EDS does it 219
-// times. The value arrives as a map entry with no AST node behind it, so
-// the old positional rule called it data and refused.
+// partial in a hash and splatted onto the tag there. A consumer app
+// does it in the hundreds. The value arrives as a map entry with no AST
+// node behind it, so the old positional rule called it data and
+// refused.
 func TestAuthoredSurvivesPartialAndSplat(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	src := `= render "icon", attrs: { onclick: "APP.closeDrawer()" }` + "\n"
 	got := mustRenderPartial(t, src, nil, partialFor(t, "icon", "%button{ **attrs }\n  x\n"))
-	tu.OK(strings.Contains(got, `onclick="APP.closeDrawer()"`))
+	is.True(strings.Contains(got, `onclick="APP.closeDrawer()"`))
 }
 
 // The same one step less indirect: a literal passed as a render arg and
 // named directly in the partial's attribute.
 func TestAuthoredSurvivesPartialArgument(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	src := `= render "icon", handler: "APP.close()"` + "\n"
 	got := mustRenderPartial(t, src, nil, partialFor(t, "icon", "%button{ onclick: handler }\n  x\n"))
-	tu.OK(strings.Contains(got, `onclick="APP.close()"`))
+	is.True(strings.Contains(got, `onclick="APP.close()"`))
 }
 
 func TestAuthoredStyleSurvivesSplat(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	src := `= render "cell", attrs: { style: "vertical-align:middle;" }` + "\n"
 	got := mustRenderPartial(t, src, nil, partialFor(t, "cell", "%td{ **attrs }\n  x\n"))
-	tu.OK(strings.Contains(got, `style="vertical-align:middle;"`))
+	is.True(strings.Contains(got, `style="vertical-align:middle;"`))
 }
 
 // Loosening the policy for a literal must not loosen it for data. A
 // handler-supplied map splatted onto a tag is data however it is spelled,
 // and the error still names the type that would vouch for it.
 func TestSplattedDataInCodeContextStillRejected(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	tmpl := mustParse(t, "%button{ **attrs }\n  x\n")
 
 	_, err := tmpl.Render(map[string]any{
 		"attrs": map[string]any{"onclick": "steal()"},
 	}, nil)
-	tu.OK(err != nil)
-	tu.OK(strings.Contains(err.Error(), "SafeJS"))
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "SafeJS"))
 
 	_, err = tmpl.Render(map[string]any{
 		"attrs": map[string]any{"style": "width:50%"},
 	}, nil)
-	tu.OK(err != nil)
-	tu.OK(strings.Contains(err.Error(), "SafeCSS"))
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "SafeCSS"))
 
 	// And the marked forms still pass, so the policy is one a handler
 	// can actually satisfy through a splat.
 	got, err := tmpl.Render(map[string]any{
 		"attrs": map[string]any{"onclick": SafeJS("APP.close()")},
 	}, nil)
-	tu.OK(err == nil)
-	tu.OK(strings.Contains(got, `onclick="APP.close()"`))
+	is.NoErr(err)
+	is.True(strings.Contains(got, `onclick="APP.close()"`))
 }
 
 // Authorship is minted at a string literal, not at a template's
 // assembling something around a value. Interpolation is where a template
 // builds code out of data, which is the case the policy exists for.
 func TestInterpolatedStringIsNotAuthored(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	src := `= render "icon", attrs: { onclick: "hide(#{id})" }` + "\n"
 	tmpl := mustParse(t, src)
 	_, err := tmpl.Render(map[string]any{"id": int64(1)},
 		partialFor(t, "icon", "%button{ **attrs }\n  x\n"))
-	tu.OK(err != nil)
-	tu.OK(strings.Contains(err.Error(), "SafeJS"))
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "SafeJS"))
 }
 
 // An authored value is still a value: it escapes, and it does not become
 // a licence to write markup from an attribute. Authorship answers the
 // policy's question about code contexts and nothing else.
 func TestAuthoredStillEscapes(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	got := mustRender(t, `%p{ title: "a <c> & 'd'" }`+"\n  x\n", nil)
-	tu.OK(strings.Contains(got, `title="a &lt;c&gt; &amp; &#39;d&#39;"`))
-	tu.OK(!strings.Contains(got, "<c>"))
+	is.True(strings.Contains(got, `title="a &lt;c&gt; &amp; &#39;d&#39;"`))
+	is.True(!strings.Contains(got, "<c>"))
 }
 
 // hml's own type must not reach app code. A helper asserts
-// args[0].(string), and EDS has several.
+// args[0].(string), and a consumer app has several.
 func TestHelperReceivesPlainString(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	var got any
 	locals := map[string]any{
 		"fn": func(args ...any) any {
@@ -109,7 +112,7 @@ func TestHelperReceivesPlainString(t *testing.T) {
 	}
 	mustRender(t, `= fn("x")`+"\n", locals)
 	_, ok := got.(string)
-	tu.OK(ok)
+	is.True(ok)
 }
 
 // The unwrap reaches inside a hash, because a helper handed one reads the
@@ -117,7 +120,7 @@ func TestHelperReceivesPlainString(t *testing.T) {
 // result, so a surface-only unwrap would render an empty label and report
 // nothing.
 func TestHelperReceivesPlainStringsInsideHash(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	var label, nested, elem any
 	locals := map[string]any{
 		"fn": func(args ...any) any {
@@ -133,17 +136,17 @@ func TestHelperReceivesPlainStringsInsideHash(t *testing.T) {
 
 	// As react_select reads it, discarded ok and all.
 	s, _ := label.(string)
-	tu.OK(s == "Stage")
+	is.Eq(s, "Stage")
 	s, _ = nested.(string)
-	tu.OK(s == "v")
+	is.Eq(s, "v")
 	s, _ = elem.(string)
-	tu.OK(s == "a")
+	is.Eq(s, "a")
 }
 
 // A helper's arguments that hold no literal are handed through as they
 // are, so the boundary costs nothing on the common call.
 func TestHelperArgsNotCopiedWithoutAuthored(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	supplied := map[string]any{"k": "v"}
 	var received any
 	locals := map[string]any{
@@ -155,10 +158,10 @@ func TestHelperArgsNotCopiedWithoutAuthored(t *testing.T) {
 	}
 	mustRender(t, "= fn(data)\n", locals)
 	m, ok := received.(map[string]any)
-	tu.OK(ok)
+	is.True(ok)
 	// Same map, not a copy of it.
 	m["k"] = "mutated"
-	tu.OK(supplied["k"] == "mutated")
+	is.Eq(supplied["k"], "mutated")
 }
 
 // Authorship is not part of a value's identity. Each of these is a type
@@ -167,72 +170,72 @@ func TestHelperArgsNotCopiedWithoutAuthored(t *testing.T) {
 
 // equal comes first: a miss renders the other branch and reports nothing.
 func TestAuthoredComparesAsString(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	src := "- if status == \"Pool\"\n  yes\n- else\n  no\n"
-	tu.OK(mustRender(t, src, map[string]any{"status": "Pool"}) == "yes\n")
-	tu.OK(mustRender(t, src, map[string]any{"status": "Early"}) == "no\n")
+	is.Eq(mustRender(t, src, map[string]any{"status": "Pool"}), "yes\n")
+	is.Eq(mustRender(t, src, map[string]any{"status": "Early"}), "no\n")
 
 	// Either side, and against itself.
-	tu.OK(equal(authored("a"), "a"))
-	tu.OK(equal("a", authored("a")))
-	tu.OK(equal(authored("a"), authored("a")))
-	tu.OK(!equal(authored("a"), "b"))
+	is.True(equal(authored("a"), "a"))
+	is.True(equal("a", authored("a")))
+	is.True(equal(authored("a"), authored("a")))
+	is.True(!equal(authored("a"), "b"))
 
 	// Still no cross-type coercion: a literal is not a number.
-	tu.OK(!equal(authored("42"), int64(42)))
+	is.True(!equal(authored("42"), int64(42)))
 }
 
 func TestAuthoredValueSemantics(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	a := authored("x")
 
 	// Not a number, as a plain string is not.
 	_, ok := toFloat(a)
-	tu.OK(!ok)
+	is.True(!ok)
 
 	// Truthy, as a plain string is, including when empty.
-	tu.OK(truthy(a))
-	tu.OK(truthy(authored("")))
+	is.True(truthy(a))
+	is.True(truthy(authored("")))
 
-	tu.OK(stringify(a) == "x")
-	tu.OK(toAttrVal(a) == "x")
+	is.Eq(stringify(a), "x")
+	is.Eq(toAttrVal(a), "x")
 
 	// Authored is not a handler's assertion. It answers the policy's
 	// question on its own, and must not answer this one.
-	tu.OK(valTrust(a) == trustNone)
+	is.Eq(valTrust(a), trustNone)
 }
 
 // A literal compared against a number errors the way a plain string does,
 // rather than comparing as one.
 func TestAuthoredOrderingComparisonFails(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	tmpl := mustParse(t, "- if \"2\" > n\n  yes\n")
 	_, err := tmpl.Render(map[string]any{"n": int64(1)}, nil)
-	tu.OK(err != nil)
-	tu.OK(strings.Contains(err.Error(), "cannot compare"))
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "cannot compare"))
 }
 
 // A literal renders as its text wherever a value renders, so authorship
 // is invisible in output.
 func TestAuthoredRendersAsItsText(t *testing.T) {
-	tu := newAssert(t)
-	tu.OK(mustRender(t, "%p\n  = \"hi\"\n", nil) == "<p>hi</p>\n")
-	tu.OK(mustRender(t, "%p\n  #{\"hi\"}\n", nil) == "<p>hi</p>\n")
+	is := is.New(t)
+	is.Eq(mustRender(t, "%p\n  = \"hi\"\n", nil), "<p>hi</p>\n")
+	is.Eq(mustRender(t, "%p\n  #{\"hi\"}\n", nil), "<p>hi</p>\n")
 }
 
 // An error a template author reads names string. authored is hml's
 // bookkeeping, and a message naming it sends the reader looking for a
 // type their app cannot have.
 func TestErrorsNameStringNotAuthored(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 
 	for _, src := range []string{
 		"%button{ **\"x\" }\n  y\n",
 		"- for c in \"abc\"\n  %p\n    x\n",
 	} {
 		_, err := mustParse(t, src).Render(nil, nil)
-		tu.OK(err != nil)
-		tu.OK(strings.Contains(err.Error(), "got string"))
+		is.HasErr(err)
+		is.True(strings.Contains(err.Error(), "got string"))
 	}
 
 	// And through a partial, where a local is an authored literal the
@@ -240,18 +243,18 @@ func TestErrorsNameStringNotAuthored(t *testing.T) {
 	for _, inner := range []string{"= h.foo\n", "= h(\"a\")\n"} {
 		src := `= render "p", h: "x"` + "\n"
 		_, err := mustParse(t, src).Render(nil, partialFor(t, "p", inner))
-		tu.OK(err != nil)
-		tu.OK(strings.Contains(err.Error(), "string"))
-		tu.OK(!strings.Contains(err.Error(), "authored"))
+		is.HasErr(err)
+		is.True(strings.Contains(err.Error(), "string"))
+		is.True(!strings.Contains(err.Error(), "authored"))
 	}
 }
 
 // A loop variable bound to a literal element carries the authorship of
 // the literal, since that is what a person wrote.
 func TestAuthoredThroughLoopVariable(t *testing.T) {
-	tu := newAssert(t)
+	is := is.New(t)
 	src := "- for h in [\"APP.a()\", \"APP.b()\"]\n  %button{ onclick: h }\n    x\n"
 	got := mustRender(t, src, nil)
-	tu.OK(strings.Contains(got, `onclick="APP.a()"`))
-	tu.OK(strings.Contains(got, `onclick="APP.b()"`))
+	is.True(strings.Contains(got, `onclick="APP.a()"`))
+	is.True(strings.Contains(got, `onclick="APP.b()"`))
 }
