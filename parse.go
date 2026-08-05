@@ -101,6 +101,9 @@ func parseLines(lines []string, baseIndent, from, to int, path string) ([]node, 
 		if err != nil {
 			return nil, err
 		}
+		// Set here rather than in parseLine's dozen returns: this is
+		// the one place that knows which line it handed over.
+		n.line = i + 1
 		nodes = append(nodes, n)
 		i = childEnd
 	}

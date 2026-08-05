@@ -949,7 +949,15 @@ func evaluate(node *astNode, ctx context) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return !truthy(val), nil
+		// Held to the rule a condition is held to. Otherwise ! is
+		// the one character that restores implicit truthiness:
+		// `- if title` is a type error and `- if !title` is not,
+		// which is the same guess with the branches swapped.
+		b, ok := val.(bool)
+		if !ok {
+			return nil, fmt.Errorf("! requires a bool, got %s", typeName(val))
+		}
+		return !b, nil
 	default:
 		return nil, fmt.Errorf("unknown AST node type: %d", node.typ)
 	}
@@ -997,10 +1005,15 @@ func evalCmp(node *astNode, ctx context) (any, error) {
 // local against a literal constantly, and `status == "Pool"` must not
 // turn on which side a person typed. A miss here renders the other
 // branch and reports nothing, so both sides drop it first.
+//
+// Absence goes through isNil rather than ==, because a nil pointer in an
+// interface is not == nil and a template asking `- if p == nil` means
+// the pointer, not the box around it. Without this the comparison a
+// condition is supposed to be written as answers backwards, silently.
 func equal(a, b any) bool {
 	a, b = unauthored(a), unauthored(b)
-	if a == nil || b == nil {
-		return a == b
+	if isNil(a) || isNil(b) {
+		return isNil(a) && isNil(b)
 	}
 	an, aNum := toFloat(a)
 	bn, bNum := toFloat(b)
@@ -1143,10 +1156,36 @@ func evalInterpString(segments []seg, ctx context) (string, error) {
 	return buf.String(), nil
 }
 
+// isNil reports whether a value is absent: an untyped nil, or a nil
+// boxed in an interface -- a nil pointer, slice, map, chan, func, or
+// interface. The second is invisible to ==, so reflection is the only
+// way to ask.
+//
+// One function answers it for both callers that need to. equal asks so
+// that `- if p == nil` means the pointer rather than the box, and
+// truthy asks so that `p || fallback` takes the fallback. When the two
+// disagreed, the comparison hml tells an author to write reported the
+// opposite of the operator beside it.
+func isNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	}
+	return false
+}
+
 // truthy follows these semantics: nil, false, and boxed nil values (such as nil
 // pointers, slices, or maps) are falsy; everything else (including 0 and "") is
-// truthy. Common scalar types are handled before falling back to reflection,
-// which is the only way to detect a boxed nil.
+// truthy. Common scalar types are handled before falling back to isNil's
+// reflection.
+//
+// It serves && and || alone, where operand-return makes it the
+// default-value idiom. A condition and a ! require a bool; see
+// renderConditional for why.
 func truthy(v any) bool {
 	switch x := v.(type) {
 	case nil:
@@ -1156,14 +1195,7 @@ func truthy(v any) bool {
 	case string, authored, int, int64, float64:
 		return true
 	}
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func, reflect.Interface:
-		if rv.IsNil() {
-			return false
-		}
-	}
-	return true
+	return !isNil(v)
 }
 
 // toAttrVal converts a Go value to an HTML attribute value string.

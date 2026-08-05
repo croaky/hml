@@ -75,6 +75,11 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 				return fmt.Errorf("%s: expression %q: %w", path, n.expr, err)
 			}
 			n.exprAST = ast
+			if n.kind != kindFor {
+				if lit := neverBool(ast); lit != "" {
+					return fmt.Errorf("%s:%d: condition %q requires a bool, got a %s literal", path, n.line, n.expr, lit)
+				}
+			}
 		case kindTag:
 			if n.attrsStr != "" {
 				attrs, err := compileAttrs(n.attrsStr)
@@ -103,6 +108,41 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 		}
 	}
 	return nil
+}
+
+// neverBool names the literal kind of a condition that cannot be a bool
+// whatever the locals hold, and "" for one that might be. A condition
+// is checked at render time too, because most of them read a field
+// whose type only the handler knows; this catches the ones the AST
+// already settles, at Parse, where the parser is the linter.
+//
+// The point is the branch nobody exercises. `- elsif title || "Untitled"`
+// is wrong the moment it is written, but a render-time check reports it
+// only when that branch is reached -- which, for an elsif, may be in
+// production and not in a test.
+//
+// && and || return an operand, so either side can be the value the
+// condition sees and both are checked. ! and a comparison always yield a
+// bool. A field or a call is unknown here by construction.
+func neverBool(n *astNode) string {
+	switch n.typ {
+	case astString, astInterpString:
+		return "string"
+	case astNumber:
+		return "number"
+	case astNil:
+		return "nil"
+	case astHash:
+		return "hash"
+	case astArray:
+		return "array"
+	case astAnd, astOr:
+		if lit := neverBool(n.left); lit != "" {
+			return lit
+		}
+		return neverBool(n.right)
+	}
+	return ""
 }
 
 // compileExpr tokenizes and parses a single expression string into an

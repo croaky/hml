@@ -352,15 +352,35 @@ func isSchemeChar(c byte) bool {
 		(c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'
 }
 
+// renderConditional takes a bool and nothing else. Implicit truthiness
+// asks the engine to guess what presence means for a value whose type
+// it cannot see: "" and 0 are present, a nil pointer is not, and which
+// of those a field is depends on how the handler happened to build it.
+// Go knows the type, so the decision belongs there -- as a comparison
+// the template states, or a bool the handler computed.
+//
+// truthy survives for && and ||. Those keep operand-return, so
+// `- if hasX || hasY` still reads as one, while `- if title` and
+// `- if title || "Untitled"` are errors that name the view and the line.
+// ! is held to the same rule as a condition, or it would be the one
+// character that puts implicit truthiness back.
+//
+// A condition whose type the AST already settles is refused at Parse
+// instead; see neverBool. This is for the rest, which is most of them:
+// a field's type is the handler's to know.
 func renderConditional(chain []node, buf *strings.Builder, ctx context, partialFn PartialFunc, path string) error {
 	for _, n := range chain {
 		switch n.kind {
 		case kindIf, kindElsif:
 			val, err := evaluate(n.exprAST, ctx)
 			if err != nil {
-				return fmt.Errorf("%s: condition eval %q: %w", path, n.expr, err)
+				return fmt.Errorf("%s:%d: condition eval %q: %w", path, n.line, n.expr, err)
 			}
-			if truthy(val) {
+			b, ok := val.(bool)
+			if !ok {
+				return fmt.Errorf("%s:%d: condition %q requires a bool, got %s", path, n.line, n.expr, typeName(val))
+			}
+			if b {
 				return renderNodes(n.children, buf, ctx, partialFn, path)
 			}
 		case kindElse:

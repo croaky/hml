@@ -277,6 +277,7 @@ const (
 type node struct {
 	kind        nodeKind
 	indent      int
+	line        int      // 1-based source line, for error messages
 	text        string   // for text, output, render expr
 	expr        string   // if/elsif condition, for collection
 	callName    string   // for kindCall: the name before the parens

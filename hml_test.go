@@ -483,9 +483,92 @@ func TestNilInterpolationInStringLiteralRendersEmpty(t *testing.T) {
 	tu.OK(!strings.Contains(got, "nil"))
 }
 
+// A condition takes a bool and nothing else. The message names the
+// view, the condition, and the type, because the fix is in the handler
+// that built the value and the reader has to find it.
+func TestConditionRequiresBool(t *testing.T) {
+	tu := newAssert(t)
+	for _, val := range []any{"", "text", int64(0), int64(1), nil, []string{}} {
+		tmpl := mustParse(t, "- if title\n  x\n")
+		_, err := tmpl.Render(map[string]any{"title": val}, nil)
+		tu.OK(err != nil)
+		tu.OK(strings.Contains(err.Error(), "requires a bool"))
+		tu.OK(strings.Contains(err.Error(), "test.hml"))
+		tu.OK(strings.Contains(err.Error(), `"title"`))
+	}
+
+	// An elsif is held to the same rule, and only when it is reached.
+	tmpl := mustParse(t, "- if a\n  x\n- elsif title\n  y\n")
+	_, err := tmpl.Render(map[string]any{"a": true, "title": "t"}, nil)
+	tu.OK(err == nil)
+	_, err = tmpl.Render(map[string]any{"a": false, "title": "t"}, nil)
+	tu.OK(err != nil)
+	tu.OK(strings.Contains(err.Error(), "requires a bool"))
+}
+
+// The forms that replace implicit truthiness still render: a comparison
+// the template states, and a bool the handler computed.
+func TestConditionAcceptsStatedComparisons(t *testing.T) {
+	tu := newAssert(t)
+	tu.OK(mustRender(t, "- if s != \"\"\n  x\n", map[string]any{"s": "a"}) == "x\n")
+	tu.OK(mustRender(t, "- if s != \"\"\n  x\n", map[string]any{"s": ""}) == "")
+	tu.OK(mustRender(t, "- if n > 0\n  x\n", map[string]any{"n": int64(1)}) == "x\n")
+	tu.OK(mustRender(t, "- if has_x\n  x\n", map[string]any{"has_x": true}) == "x\n")
+}
+
+// && and || keep operand-return, so a condition built from bools is
+// still one, and one built from a string is the error it should be.
+func TestConditionShortCircuitStillReturnsOperand(t *testing.T) {
+	tu := newAssert(t)
+	src := "- if a || b\n  x\n"
+	tu.OK(mustRender(t, src, map[string]any{"a": false, "b": true}) == "x\n")
+	tu.OK(mustRender(t, src, map[string]any{"a": false, "b": false}) == "")
+}
+
+// A condition the AST already settles is refused at Parse, so the
+// branch nobody exercises fails on the way in rather than the first
+// time it is reached. The message carries the line, because a template
+// has more than one condition in it.
+func TestLiteralConditionRejectedAtParse(t *testing.T) {
+	tu := newAssert(t)
+	for _, src := range []string{
+		"- if \"x\"\n  y\n",
+		"- if 1\n  y\n",
+		"- if nil\n  y\n",
+		"- if title || \"Untitled\"\n  y\n",
+		"- if a\n  y\n- elsif \"x\"\n  z\n",
+	} {
+		_, err := Parse(src, "test.hml", nil)
+		tu.OK(err != nil)
+		tu.OK(strings.Contains(err.Error(), "requires a bool"))
+	}
+
+	_, err := Parse("%p\n%p\n- if \"x\"\n  y\n", "test.hml", nil)
+	tu.OK(err != nil)
+	tu.OK(strings.Contains(err.Error(), "test.hml:3"))
+
+	// A for collection is not a condition and takes a literal.
+	tu.OK(mustRender(t, "- for x in [1, 2]\n  = x\n", nil) == "1\n2\n")
+}
+
+// ! is a conditional written backwards, so it takes a bool and nothing
+// else. Otherwise one character restores the guess.
+func TestNotRequiresBool(t *testing.T) {
+	tu := newAssert(t)
+	tu.OK(mustRender(t, "- if !b\n  x\n", map[string]any{"b": false}) == "x\n")
+	tu.OK(mustRender(t, "- if !b\n  x\n", map[string]any{"b": true}) == "")
+
+	tmpl := mustParse(t, "- if !title\n  x\n")
+	_, err := tmpl.Render(map[string]any{"title": ""}, nil)
+	tu.OK(err != nil)
+	tu.OK(strings.Contains(err.Error(), "! requires a bool"))
+}
+
+// == nil is how a template asks about absence, and it has to answer for
+// a typed nil in an interface -- which Go's own == reads as present.
 func TestTypedNilPointerIsFalsy(t *testing.T) {
 	tu := newAssert(t)
-	src := "- if val\n  truthy\n- else\n  falsy\n"
+	src := "- if val == nil\n  falsy\n- else\n  truthy\n"
 
 	// nil pointer
 	var p *string = nil
@@ -502,6 +585,11 @@ func TestTypedNilPointerIsFalsy(t *testing.T) {
 	// nil func
 	var f func() = nil
 	tu.OK(mustRender(t, src, map[string]any{"val": f}) == "falsy\n")
+
+	// A non-nil pointer is present, which is the half a policy that
+	// only rejects would not show.
+	str := "x"
+	tu.OK(mustRender(t, src, map[string]any{"val": &str}) == "truthy\n")
 }
 
 func TestTypedSliceFor(t *testing.T) {

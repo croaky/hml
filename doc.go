@@ -108,11 +108,32 @@
 // rules. They are documented here so the language has one specification
 // rather than behavior discovered per template.
 //
-// Truthiness (- if, - elsif, &&, ||, !): nil, the boolean false, and a
-// boxed nil (a nil pointer, slice, map, chan, func, or interface) are
-// falsy. Everything else is truthy — including the empty string "", the
-// number 0, and an empty but non-nil slice. This is why templates that
-// want "non-empty string" must write - if s != "" rather than - if s.
+// Conditions (- if, - elsif, !): the value must be a bool. Anything else
+// is an error naming the view, the line, the condition, and the type —
+// at Parse when the expression settles it (- if "x", - if title ||
+// "Untitled"), at Render otherwise. There is no implicit truthiness to
+// fall back on, because presence is not a property the engine can read
+// off an untyped value: "" and 0 are present, a nil pointer is not, and
+// which of those a field is depends on how the handler built it. Go
+// knows the type, so the decision is made there — as a comparison the
+// template states (- if s != "", - if n > 0, - if p == nil), or as a
+// bool the handler computed (- if co.HasWebsite).
+//
+// ! is held to the same rule, because it is a conditional written
+// backwards: were it exempt, - if title would be an error and
+// - if !title the same guess with the branches swapped.
+//
+// Truthiness (&&, ||): nil, the boolean false, and a boxed nil (a nil
+// pointer, slice, map, chan, func, or interface) are falsy. Everything
+// else is truthy — including the empty string "", the number 0, and an
+// empty but non-nil slice. These two keep it because they are also the
+// default-value idiom below; a conditional does not.
+//
+// Absence (== nil, != nil): a nil pointer, slice, map, chan, func, or
+// interface is nil, the same values && and || read as falsy. Go's own ==
+// would say otherwise for a typed nil inside an interface, which would
+// make - if p == nil answer backwards for the pointer the doc above
+// tells an author to test that way.
 //
 // Equality (==, !=): values compare equal only within the same type; there
 // is no cross-type coercion, with one exception — the numeric types int,
@@ -126,8 +147,12 @@
 //
 // && and || return an operand, not a bool: a && b yields a when a is
 // falsy, else b; a || b yields a when a is truthy, else b. This is the
-// JS/Ruby-style default-value idiom, so title || "Untitled" works. Only !
-// always yields a bool.
+// JS/Ruby-style default-value idiom, so title || "Untitled" works in an
+// output or an attribute.
+//
+// The two rules meet in a condition. hasX || hasY is fine: both operands
+// are bools, so the operand returned is one. title || "Untitled" is a
+// type error there, because the operand returned is a string.
 //
 // Stringification (= output, #{} interpolation): nil renders as the empty
 // string; numbers and bools render in their Go form. Rendering never
