@@ -81,3 +81,24 @@ leaving a record of work already done.
 
 cibot is origin and holds no tags. `scripts/tag vX.Y.Z` publishes one
 annotated tag to the GitHub mirror, which is what a `go get` resolves.
+
+No user should discover a break from a tag. `scripts/tag` refuses a
+dirty tree and a `main` behind the farmer's, but it cannot know whether
+the code is any good to the repos that will fetch it. So before tagging,
+point each user at the working tree:
+
+```sh
+go mod edit -replace github.com/croaky/hml=/path/to/hml/worktree
+go build ./... && go test ./...
+```
+
+The `replace` is a local experiment and must not be committed. Every
+breaking release so far has been sized wrong until this was run.
+
+Bump each user in the same sitting. Two versions of the engine in use at
+once means the next change has to reason about both.
+
+A pre-1.0 library with two known users can keep constraining what used
+to pass, but the cheapness depends on knowing every user. If a third
+appears, the next constraint needs a deprecation path rather than an
+afternoon.
