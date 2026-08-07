@@ -138,6 +138,16 @@ numeric prefix means land in this order; unnumbered siblings are
 parallel and pickable anytime. Delete a plan's text as it ships rather
 than leaving a record of work already done.
 
+## Changes
+
+Work happens on a cibot change. `cibot checkout` allocates one and
+prints a worktree; `cibot edit` sets its title and description. Do the
+edit before the code, not after. A change with neither is a blank row on
+the dashboard and a blank `cibot show`, so nobody looking at either can
+tell what it is or whether it overlaps what they are about to start. A
+rough sentence beats an empty one, and the description gets rewritten
+before the merge anyway.
+
 ## Commits
 
 - Prefix with the stage the change acts on: `parse:`, `compile:`,
