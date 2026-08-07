@@ -48,7 +48,7 @@ which also builds against the ABI that nvim speaks.
 After a `grammar.js` change:
 
 ```sh
-tree-sitter generate
+tree-sitter generate --js-runtime native
 tree-sitter test
 ```
 
@@ -57,6 +57,14 @@ and fails without it. That ordering is why the `grammar` job runs both
 rather than just the second: with no C in the tree, a `grammar.js` the
 CLI cannot build is a grammar nobody can install, and generating is
 what catches it.
+
+`--js-runtime native` reads `grammar.js` with the QuickJS the CLI
+embeds. The default is `node`, and that default was the only thing on a
+CI worker that needed a JavaScript runtime, so the flag is what lets
+the worker have none. It pins the engine to whatever QuickJS the CLI
+vendors, which is a version to bump rather than a runtime to install. A
+`grammar.js` that required an npm package would break under it; this
+one is the DSL and nothing else.
 
 The job needs the CLI and a C compiler on the worker, installed by
 cibot's `scripts/provision-vm-workers.sh`.

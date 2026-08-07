@@ -22,4 +22,11 @@ hints: git ls-files -z '*.go' | xargs -0 gopls check -severity=hint | awk '1; EN
 # `test` then compiles that parser and runs the corpus, which is why it
 # needs a C compiler as well as the CLI. Both come from
 # cibot's scripts/provision-vm-workers.sh.
-grammar: tree-sitter generate && tree-sitter test
+#
+# --js-runtime native reads grammar.js with the QuickJS the CLI already
+# embeds. The default is node, which was the only reason a worker or a
+# laptop needed a JavaScript runtime at all: nothing else here runs
+# JavaScript. The flag lives here rather than in a worker's environment
+# so the command reads the same in both places, and so a laptop without
+# node does not pass CI and fail locally.
+grammar: tree-sitter generate --js-runtime native && tree-sitter test
