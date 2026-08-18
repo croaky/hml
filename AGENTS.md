@@ -156,6 +156,16 @@ tell what it is or whether it overlaps what they are about to start. A
 rough sentence beats an empty one, and the description gets rewritten
 before the merge anyway.
 
+After a push, read the checks with `git push && cibot show --wait`
+rather than sleeping and then reading. The farmer holds the request open
+and answers within a second of the last check, so a sleep is either time
+spent waiting for an answer that already arrived or too short to reach
+one. Too short is the worse half: a `cibot show` that lands before the
+push is recorded reports the previous commit's checks, green, about the
+wrong code. `--wait` follows the commit in the worktree it runs in,
+exits nonzero when a check failed, and gives up after ten minutes
+(`--timeout`).
+
 ## Commits
 
 - Prefix with the stage the change acts on: `parse:`, `compile:`,
