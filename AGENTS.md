@@ -47,8 +47,15 @@ its own file:
   including the attribute policy and escaping.
 
 `api.go` is the exported surface: `Parse`, `Render`, `RenderContext`,
-`Names`, `Renders`, and the `Safe*` types. `doc.go` is documentation
-only.
+`RenderContextTo`, `Names`, `Renders`, `PartialFunc`, `PartialWriter`,
+and the `Safe*` types. `doc.go` is documentation only.
+
+Render does no work Parse can do. An expression compiles to an AST at
+Parse, a literal is boxed once there, and a tag whose attributes are
+all literals has its attribute string written there
+(`hoistStaticAttrs`). A render then writes strings into one buffer:
+no builder per tag, per text node, or per partial. Measure a change
+to `render.go` with `go test -bench . -benchmem` before and after.
 
 ## Grammar
 

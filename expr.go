@@ -346,6 +346,7 @@ const (
 
 type astNode struct {
 	typ      nodeType
+	lit      any        // for astString, astNumber: the value, boxed once at parse
 	str      string     // for astString
 	segments []seg      // for astInterpString
 	num      int64      // for astNumber
@@ -623,13 +624,13 @@ func (p *parser) parsePrimary() (*astNode, error) {
 	switch t.typ {
 	case tokString:
 		p.advance()
-		return &astNode{typ: astString, str: t.str}, nil
+		return &astNode{typ: astString, str: t.str, lit: authored(t.str)}, nil
 	case tokInterpString:
 		p.advance()
 		return &astNode{typ: astInterpString, segments: t.seg}, nil
 	case tokNumber:
 		p.advance()
-		return &astNode{typ: astNumber, num: t.num}, nil
+		return &astNode{typ: astNumber, num: t.num, lit: t.num}, nil
 	case tokBool:
 		p.advance()
 		return &astNode{typ: astBool, b: t.b}, nil
@@ -772,9 +773,8 @@ func NewContext(vars map[string]any) *Context {
 // Child overlays vars on the receiver without copying the parent. A nil
 // overlay is treated as empty. Child bindings shadow parent bindings.
 func (c *Context) Child(vars map[string]any) *Context {
-	if vars == nil {
-		vars = map[string]any{}
-	}
+	// A nil map reads as empty, so an overlay with no bindings costs
+	// nothing to look through.
 	return &Context{vars: vars, parent: c}
 }
 
@@ -890,12 +890,13 @@ func evaluate(node *astNode, ctx context) (any, error) {
 	case astString:
 		// The one place authorship is minted. An interpolated
 		// string is not authored, however literal its segments:
-		// the template assembled it around a value.
-		return authored(node.str), nil
+		// the template assembled it around a value. Boxed once at
+		// parse, so a render does not allocate to return a literal.
+		return node.lit, nil
 	case astInterpString:
 		return evalInterpString(node.segments, ctx)
 	case astNumber:
-		return node.num, nil
+		return node.lit, nil
 	case astBool:
 		return node.b, nil
 	case astNil:
@@ -1140,6 +1141,13 @@ func buildFieldIndex(rt reflect.Type) map[string]int {
 // value with stringify so nil renders empty, matching text interpolation and
 // the = output path.
 func evalInterpString(segments []seg, ctx context) (string, error) {
+	if len(segments) == 1 && segments[0].kind == segInterp {
+		val, err := evaluate(segments[0].expr, ctx)
+		if err != nil {
+			return "", err
+		}
+		return stringify(val), nil
+	}
 	var buf strings.Builder
 	for _, s := range segments {
 		switch s.kind {

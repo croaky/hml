@@ -2,6 +2,7 @@ package hml
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -106,6 +107,51 @@ func BenchmarkRenderPartialsLoop(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := tmpl.Render(locals, partialFn); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkRenderPartialsLoopWriter is BenchmarkRenderPartialsLoop on
+// the one-buffer path: the partial writes into the caller's builder
+// rather than returning a string the caller copies.
+func BenchmarkRenderPartialsLoopWriter(b *testing.B) {
+	rowSrc := "%li{ class: cls, \"data-id\": id }\n" +
+		"  = name\n"
+	rowTmpl, err := Parse(rowSrc, "_row.hml", nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	src := "%ul\n" +
+		"  - for row in rows\n" +
+		"    = render \"row\", name: row.name, cls: row.cls, id: row.id\n"
+	tmpl, err := Parse(src, "bench.hml", nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	rows := make([]any, 100)
+	for i := range rows {
+		rows[i] = map[string]any{
+			"name": fmt.Sprintf("Row %d", i),
+			"cls":  "row",
+			"id":   int64(i),
+		}
+	}
+	locals := map[string]any{"rows": rows}
+	for i := range 50 {
+		locals[fmt.Sprintf("layout_key_%d", i)] = i
+	}
+
+	partial := func(name string, ctx *Context, w *strings.Builder) error {
+		return rowTmpl.RenderContextTo(w, ctx, nil)
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		var w strings.Builder
+		if err := tmpl.RenderContextTo(&w, NewContext(locals), partial); err != nil {
 			b.Fatal(err)
 		}
 	}

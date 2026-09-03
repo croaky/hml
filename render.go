@@ -21,7 +21,7 @@ var preserveElements = map[string]bool{
 	"textarea": true, "pre": true,
 }
 
-func renderNodes(nodes []node, buf *strings.Builder, ctx context, partialFn PartialFunc, path string) error {
+func renderNodes(nodes []node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
 	i := 0
 	for i < len(nodes) {
 		n := nodes[i]
@@ -56,11 +56,9 @@ func renderNodes(nodes []node, buf *strings.Builder, ctx context, partialFn Part
 			buf.WriteString(n.transform(stringify(val)))
 			buf.WriteByte('\n')
 		case kindRender:
-			s, err := renderPartialCall(n, ctx, partialFn, path)
-			if err != nil {
+			if err := renderPartialCall(n, buf, ctx, partialFn, path); err != nil {
 				return err
 			}
-			buf.WriteString(s)
 		case kindTag:
 			if err := renderTag(n, buf, ctx, partialFn, path); err != nil {
 				return err
@@ -91,20 +89,134 @@ func renderNodes(nodes []node, buf *strings.Builder, ctx context, partialFn Part
 	return nil
 }
 
-func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialFunc, path string) error {
+func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
+	tag := n.tag
+
+	// A lone text child is one leaf, so its string is known before
+	// the opening tag is written. Evaluating it first, rather than
+	// rendering it into a second buffer, is what lets the tag choose
+	// its layout without a copy.
+	if len(n.children) > 0 && !voidElements[tag] && !preserveElements[tag] && loneTextChild(n.children) {
+		text, err := renderLeaf(n.children[0], ctx, path)
+		if err != nil {
+			return err
+		}
+		buf.WriteByte('<')
+		buf.WriteString(tag)
+		if err := writeAttrs(n, buf, ctx, path); err != nil {
+			return err
+		}
+		// A run of text can turn out to be several lines: a
+		// transform emits the HTML it was given, and markdown of
+		// two paragraphs is two blocks. Hanging those off the
+		// opening tag buys nothing -- the collapsed space they
+		// would have is between blocks, where nothing sees it --
+		// and costs the shape that makes the output readable.
+		if strings.Contains(text, "\n") {
+			buf.WriteString(">\n")
+			buf.WriteString(text)
+			buf.WriteString("\n</")
+		} else {
+			buf.WriteByte('>')
+			buf.WriteString(text)
+			buf.WriteString("</")
+		}
+		buf.WriteString(tag)
+		buf.WriteString(">\n")
+		return nil
+	}
+
+	buf.WriteByte('<')
+	buf.WriteString(tag)
+	if err := writeAttrs(n, buf, ctx, path); err != nil {
+		return err
+	}
+
+	if voidElements[tag] {
+		buf.WriteString(">\n")
+		return nil
+	}
+
+	if len(n.children) > 0 {
+		if preserveElements[tag] {
+			// A preserve element keeps its lines regardless; there
+			// the whitespace is the content.
+			var inner strings.Builder
+			if err := renderNodes(n.children, &inner, ctx, partialFn, path); err != nil {
+				return err
+			}
+			buf.WriteByte('>')
+			buf.WriteString(trimRenderedNewline(inner.String()))
+		} else {
+			buf.WriteString(">\n")
+			if err := renderNodes(n.children, buf, ctx, partialFn, path); err != nil {
+				return err
+			}
+		}
+		buf.WriteString("</")
+	} else {
+		buf.WriteString("></")
+	}
+	buf.WriteString(tag)
+	buf.WriteString(">\n")
+	return nil
+}
+
+// renderLeaf evaluates a text, output, or transform node to the string
+// renderNodes would write for it, without the trailing newline.
+func renderLeaf(n node, ctx context, path string) (string, error) {
+	switch n.kind {
+	case kindText:
+		s, err := evalInterp(n.textSegs, ctx, true)
+		if err != nil {
+			return "", fmt.Errorf("%s: text interpolation: %w", path, err)
+		}
+		return s, nil
+	case kindOutput:
+		val, err := evaluate(n.exprAST, ctx)
+		if err != nil {
+			return "", fmt.Errorf("%s: output eval %q: %w", path, n.text, err)
+		}
+		if s, ok := val.(SafeString); ok {
+			return string(s), nil
+		}
+		return escapeHTML(stringify(val)), nil
+	case kindTransform:
+		val, err := evaluate(n.exprAST, ctx)
+		if err != nil {
+			return "", fmt.Errorf("%s: transform eval %q: %w", path, n.expr, err)
+		}
+		return n.transform(stringify(val)), nil
+	}
+	return "", fmt.Errorf("%s: not a leaf: %d", path, n.kind)
+}
+
+// writeAttrs writes a tag's attributes after its name, each preceded
+// by a space. Sentinel values from toAttrVal: \x00true is a boolean
+// attribute, \x00false and \x00nil are omitted.
+func writeAttrs(n node, buf *strings.Builder, ctx context, path string) error {
+	if n.attrsAreStatic {
+		buf.WriteString(n.staticAttrs)
+		return nil
+	}
+	return writeAttrsDynamic(n, buf, ctx, path)
+}
+
+// writeAttrsDynamic evaluates and writes a tag's attributes. Parse calls
+// it once for a static tag; render calls it for the rest.
+func writeAttrsDynamic(n node, buf *strings.Builder, ctx context, path string) error {
+	if n.attrs == nil && len(n.classes) == 0 && n.id == "" {
+		return nil
+	}
 	attrs, err := buildAttrs(n, ctx, path)
 	if err != nil {
 		return err
 	}
-
-	var attrStr strings.Builder
-	// Sentinel values from toAttrVal: \x00true → boolean attribute,
-	// \x00false/\x00nil → omit entirely.
 	for _, a := range attrs {
 		switch a.val {
 		case "\x00true":
-			attrStr.WriteByte(' ')
-			attrStr.WriteString(a.key)
+			buf.WriteByte(' ')
+			buf.WriteString(a.key)
 		case "\x00false", "\x00nil":
 			// omit
 		default:
@@ -112,78 +224,12 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialFunc,
 			if err != nil {
 				return fmt.Errorf("%s: %w", path, err)
 			}
-			attrStr.WriteByte(' ')
-			attrStr.WriteString(a.key)
-			attrStr.WriteString("=\"")
-			attrStr.WriteString(escapeHTML(val))
-			attrStr.WriteByte('"')
+			buf.WriteByte(' ')
+			buf.WriteString(a.key)
+			buf.WriteString("=\"")
+			buf.WriteString(escapeHTML(val))
+			buf.WriteByte('"')
 		}
-	}
-
-	tag := n.tag
-	as := attrStr.String()
-
-	if voidElements[tag] {
-		buf.WriteByte('<')
-		buf.WriteString(tag)
-		buf.WriteString(as)
-		buf.WriteString(">\n")
-		return nil
-	}
-
-	if len(n.children) > 0 {
-		if preserveElements[tag] || loneTextChild(n.children) {
-			var inner strings.Builder
-			if err := renderNodes(n.children, &inner, ctx, partialFn, path); err != nil {
-				return err
-			}
-			text := trimRenderedNewline(inner.String())
-			// A run of text can turn out to be several lines: a
-			// transform emits the HTML it was given, and markdown of
-			// two paragraphs is two blocks. Hanging those off the
-			// opening tag buys nothing -- the collapsed space they
-			// would have is between blocks, where nothing sees it --
-			// and costs the shape that makes the output readable. A
-			// preserve element keeps its lines regardless; there the
-			// whitespace is the content.
-			if !preserveElements[tag] && strings.Contains(text, "\n") {
-				buf.WriteByte('<')
-				buf.WriteString(tag)
-				buf.WriteString(as)
-				buf.WriteString(">\n")
-				buf.WriteString(inner.String())
-				buf.WriteString("</")
-				buf.WriteString(tag)
-				buf.WriteString(">\n")
-				return nil
-			}
-			buf.WriteByte('<')
-			buf.WriteString(tag)
-			buf.WriteString(as)
-			buf.WriteByte('>')
-			buf.WriteString(text)
-			buf.WriteString("</")
-			buf.WriteString(tag)
-			buf.WriteString(">\n")
-		} else {
-			buf.WriteByte('<')
-			buf.WriteString(tag)
-			buf.WriteString(as)
-			buf.WriteString(">\n")
-			if err := renderNodes(n.children, buf, ctx, partialFn, path); err != nil {
-				return err
-			}
-			buf.WriteString("</")
-			buf.WriteString(tag)
-			buf.WriteString(">\n")
-		}
-	} else {
-		buf.WriteByte('<')
-		buf.WriteString(tag)
-		buf.WriteString(as)
-		buf.WriteString("></")
-		buf.WriteString(tag)
-		buf.WriteString(">\n")
 	}
 	return nil
 }
@@ -228,9 +274,8 @@ func loneTextChild(children []node) bool {
 }
 
 func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {
-	var result []attrVal
-	shorthandClasses := n.classes
-	var attrClasses []string
+	result := make([]attrVal, 0, len(n.attrs)+2)
+	class := n.classStr
 
 	if n.attrs != nil {
 		pairs, err := evalAttrs(n.attrs, ctx)
@@ -244,16 +289,19 @@ func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {
 				if p.val == "\x00true" || p.val == "\x00false" || p.val == "\x00nil" || p.val == "" {
 					continue
 				}
-				attrClasses = append(attrClasses, p.val)
+				if class == "" {
+					class = p.val
+				} else {
+					class += " " + p.val
+				}
 			} else {
 				result = append(result, p)
 			}
 		}
 	}
 
-	allClasses := append(shorthandClasses, attrClasses...)
-	if len(allClasses) > 0 {
-		result = append(result, attrVal{key: "class", val: strings.Join(allClasses, " "), authored: true})
+	if class != "" {
+		result = append(result, attrVal{key: "class", val: class, authored: true})
 	}
 
 	if n.id != "" {
@@ -368,7 +416,7 @@ func isSchemeChar(c byte) bool {
 // A condition whose type the AST already settles is refused at Parse
 // instead; see neverBool. This is for the rest, which is most of them:
 // a field's type is the handler's to know.
-func renderConditional(chain []node, buf *strings.Builder, ctx context, partialFn PartialFunc, path string) error {
+func renderConditional(chain []node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
 	for _, n := range chain {
 		switch n.kind {
 		case kindIf, kindElseIf:
@@ -390,7 +438,7 @@ func renderConditional(chain []node, buf *strings.Builder, ctx context, partialF
 	return nil
 }
 
-func renderFor(n node, buf *strings.Builder, ctx context, partialFn PartialFunc, path string) error {
+func renderFor(n node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
 	val, err := evaluate(n.exprAST, ctx)
 	if err != nil {
 		return fmt.Errorf("%s: for collection eval %q: %w", path, n.expr, err)
@@ -463,36 +511,36 @@ var renderVarRE = regexp.MustCompile(`\Arender\s+(\w[\w.]*)(?:,\s*(.*))?\z`)
 // renderNameExpr (variable), and args from the compiled renderArgs. The args
 // become a child context layered on the caller's, so the partial inherits the
 // caller's locals without copying them.
-func renderPartialCall(n node, ctx context, partialFn PartialFunc, path string) (string, error) {
+func renderPartialCall(n node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
 	if partialFn == nil {
-		return "", fmt.Errorf("%s: no partialFn provided for: %s", path, n.text)
+		return fmt.Errorf("%s: no partialFn provided for: %s", path, n.text)
 	}
 
 	var name string
 	if n.renderNameSegs != nil {
 		s, err := evalInterp(n.renderNameSegs, ctx, false)
 		if err != nil {
-			return "", err
+			return err
 		}
 		name = s
 	} else {
 		val, err := evaluate(n.renderNameExpr, ctx)
 		if err != nil {
-			return "", err
+			return err
 		}
 		name = stringify(val)
 	}
 
-	overlay := map[string]any{}
+	var overlay map[string]any
 	if n.renderArgs != nil {
 		var err error
 		overlay, err = evalLocals(n.renderArgs, ctx)
 		if err != nil {
-			return "", fmt.Errorf("%s: render args eval: %w", path, err)
+			return fmt.Errorf("%s: render args eval: %w", path, err)
 		}
 	}
 
-	return partialFn(name, ctx.Child(overlay))
+	return partialFn(name, ctx.Child(overlay), buf)
 }
 
 // stringify converts a value to a string: nil becomes "" (not "<nil>").
@@ -589,7 +637,12 @@ func toAnySlice(v any) ([]any, bool) {
 	return result, true
 }
 
-// escapeHTML escapes &, <, >, " for HTML output.
+// escapeHTML escapes &, ', <, >, and " for HTML output. Most values
+// hold none of them, and html.EscapeString scans once per character it
+// replaces, so one scan first answers the common case.
 func escapeHTML(s string) string {
+	if !strings.ContainsAny(s, "&'<>\"") {
+		return s
+	}
 	return html.EscapeString(s)
 }

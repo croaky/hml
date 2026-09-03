@@ -88,6 +88,9 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 				}
 				n.attrs = attrs
 			}
+			if err := hoistStaticAttrs(n, path); err != nil {
+				return err
+			}
 		case kindRender:
 			if err := compileRender(n); err != nil {
 				return fmt.Errorf("%s: render %q: %w", path, n.text, err)
@@ -107,6 +110,31 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 			return err
 		}
 	}
+	return nil
+}
+
+// hoistStaticAttrs renders a tag's attributes once, at Parse, when
+// nothing in them reads a local: no splat, and every value a literal.
+// The result is what writeAttrs would write on every render, so the
+// render writes it instead. A literal is authored, so the attribute
+// policy answers the same at Parse as it would at render.
+func hoistStaticAttrs(n *node, path string) error {
+	for _, a := range n.attrs {
+		if a.splat {
+			return nil
+		}
+		switch a.val.typ {
+		case astString, astNumber, astBool, astNil:
+		default:
+			return nil
+		}
+	}
+	var buf strings.Builder
+	if err := writeAttrsDynamic(*n, &buf, nil, path); err != nil {
+		return err
+	}
+	n.staticAttrs = buf.String()
+	n.attrsAreStatic = true
 	return nil
 }
 
@@ -291,6 +319,23 @@ func compileInterp(text string) ([]interpSeg, error) {
 // with stringify (nil renders empty) so text interpolation agrees with the =
 // output path. stringify also skips reflection for common scalars.
 func evalInterp(segs []interpSeg, ctx context, escape bool) (string, error) {
+	// One segment needs no buffer: a literal is returned as is, and a
+	// lone expression is stringified and escaped in place.
+	if len(segs) == 1 {
+		s := segs[0]
+		if s.expr == nil {
+			return s.lit, nil
+		}
+		val, err := evaluate(s.expr, ctx)
+		if err != nil {
+			return "", err
+		}
+		str := stringify(val)
+		if escape {
+			str = escapeHTML(str)
+		}
+		return str, nil
+	}
 	var buf strings.Builder
 	for _, s := range segs {
 		if s.expr == nil {

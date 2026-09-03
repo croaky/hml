@@ -323,6 +323,7 @@ func parseTag(stripped string, indent int, lines []string, childFrom, childTo in
 		kind:     kindTag,
 		tag:      tagName,
 		classes:  classes,
+		classStr: strings.Join(classes, " "),
 		id:       id,
 		attrsStr: attrsStr,
 		indent:   indent,

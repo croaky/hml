@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/croaky/is"
@@ -831,6 +832,72 @@ func TestTransformRejectsNonFieldArguments(t *testing.T) {
 		_, err := Parse(src+"\n", "test.hml", testTransforms)
 		is.HasErr(err)
 		is.True(strings.Contains(err.Error(), "single field access"))
+	}
+}
+
+// A tag whose classes, id, and attribute values are all literals
+// renders the same string every time, so Parse renders it once. A tag
+// that reads a local does not, so it is left for Render.
+func TestStaticAttributesHoistedAtParse(t *testing.T) {
+	is := is.New(t)
+	tmpl := mustParse(t, "%a.btn#go{ href: \"/x\", title: \"Go\", disabled: false, hidden: true, n: 3 }\n  x\n")
+	n := tmpl.nodes[0]
+	is.True(n.attrsAreStatic)
+	is.Eq(n.staticAttrs, ` class="btn" hidden href="/x" id="go" n="3" title="Go"`)
+
+	got, err := tmpl.Render(nil, nil)
+	is.NoErr(err)
+	is.Eq(got, `<a class="btn" hidden href="/x" id="go" n="3" title="Go">x</a>`+"\n")
+
+	for _, src := range []string{
+		"%a{ href: url }\n",
+		"%a{ href: \"/x/#{id}\" }\n",
+		"%a{ **attrs }\n",
+		"%a{ class: [\"x\"] }\n",
+	} {
+		is.True(!mustParse(t, src).nodes[0].attrsAreStatic)
+	}
+}
+
+// The attribute policy answers the same for a literal at Parse as it
+// would at Render, so hoisting changes when it runs and not what it
+// says: a literal URL with a refused scheme is still the sentinel, and
+// a literal on* handler is still authored.
+func TestStaticAttributesKeepThePolicy(t *testing.T) {
+	is := is.New(t)
+	got := mustRender(t, `%a{ href: "javascript:alert(1)" }`+"\n  x\n", nil)
+	is.True(strings.Contains(got, `href="#ZgotmplZ"`))
+
+	got = mustRender(t, `%button{ onclick: "APP.close()" }`+"\n  x\n", nil)
+	is.True(strings.Contains(got, `onclick="APP.close()"`))
+
+	got = mustRender(t, `%p{ title: "a <c> & 'd'" }`+"\n  x\n", nil)
+	is.True(strings.Contains(got, `title="a &lt;c&gt; &amp; &#39;d&#39;"`))
+}
+
+// One parsed template serves every request, so renders of it run at
+// once. The shorthand classes are a slice on the node, and appending a
+// dynamic class to it wrote into the node's own array whenever the
+// slice had room, which the race detector reports as two renders
+// writing one slot. Three shorthand classes leave room for a fourth.
+func TestConcurrentRendersDoNotShareTheClassSlice(t *testing.T) {
+	is := is.New(t)
+	tmpl := mustParse(t, "%a.one.two.three{ class: extra }\n  x\n")
+
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	outs := make([]string, 8)
+	for i := range errs {
+		wg.Go(func() {
+			extra := fmt.Sprintf("r%d", i)
+			outs[i], errs[i] = tmpl.Render(map[string]any{"extra": extra}, nil)
+		})
+	}
+	wg.Wait()
+
+	for i := range errs {
+		is.NoErr(errs[i])
+		is.True(strings.Contains(outs[i], fmt.Sprintf(`class="one two three r%d"`, i)))
 	}
 }
 

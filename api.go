@@ -18,6 +18,28 @@ type Transform func(string) string
 // returns HTML.
 type PartialFunc func(name string, ctx *Context) (string, error)
 
+// PartialWriter is PartialFunc with the caller's buffer: the partial
+// writes into w rather than returning a string the caller copies. A
+// page that renders a partial per row saves a buffer, a copy, and the
+// garbage of both, per row.
+type PartialWriter func(name string, ctx *Context, w *strings.Builder) error
+
+// adaptPartial wraps a PartialFunc as a PartialWriter. A nil PartialFunc
+// stays nil, so a template with no partials renders without one.
+func adaptPartial(fn PartialFunc) PartialWriter {
+	if fn == nil {
+		return nil
+	}
+	return func(name string, ctx *Context, w *strings.Builder) error {
+		s, err := fn(name, ctx)
+		if err != nil {
+			return err
+		}
+		w.WriteString(s)
+		return nil
+	}
+}
+
 // Template is a parsed hml template.
 type Template struct {
 	path    string
@@ -250,10 +272,17 @@ func (t *Template) Render(locals map[string]any, partialFn PartialFunc) (string,
 // PartialFunc, avoiding a per-partial copy of the caller's locals.
 func (t *Template) RenderContext(ctx *Context, partialFn PartialFunc) (string, error) {
 	var buf strings.Builder
-	if err := renderNodes(t.nodes, &buf, ctx, partialFn, t.path); err != nil {
+	if err := renderNodes(t.nodes, &buf, ctx, adaptPartial(partialFn), t.path); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// RenderContextTo executes the template against ctx and writes the
+// HTML into w. A PartialWriter that calls RenderContextTo on the same w
+// renders a whole page into one buffer.
+func (t *Template) RenderContextTo(w *strings.Builder, ctx *Context, partialFn PartialWriter) error {
+	return renderNodes(t.nodes, w, ctx, partialFn, t.path)
 }
 
 type nodeKind int
@@ -283,6 +312,7 @@ type node struct {
 	callName    string   // for kindCall: the name before the parens
 	tag         string   // for tag
 	classes     []string // for tag
+	classStr    string   // for tag: classes joined, once at parse
 	id          string   // for tag
 	attrsStr    string   // raw attribute hash string for tag
 	filterName  string   // for filter
@@ -292,11 +322,18 @@ type node struct {
 	children    []node
 
 	// Compiled at Parse time by compileNodes; consumed by Render.
-	exprAST    *astNode      // if/else if condition, for collection, output, transform
-	transform  Transform     // resolved rich-text builtin (kindTransform)
-	attrs      []attr        // tag attribute hash
-	textSegs   []interpSeg   // static text interpolation
-	filterSegs [][]interpSeg // filter lines, indent stripped, per line
+	exprAST   *astNode  // if/else if condition, for collection, output, transform
+	transform Transform // resolved rich-text builtin (kindTransform)
+	attrs     []attr    // tag attribute hash
+	// staticAttrs holds the whole attribute string, leading space
+	// included, for a tag whose classes, id, and attribute values are
+	// all literals. Most tags are. Set at Parse by hoistStaticAttrs,
+	// so a render writes one string rather than evaluating, sorting,
+	// and escaping the same values every time.
+	staticAttrs    string
+	attrsAreStatic bool
+	textSegs       []interpSeg   // static text interpolation
+	filterSegs     [][]interpSeg // filter lines, indent stripped, per line
 
 	// Compiled render call (kindRender), replacing per-render regexp +
 	// tokenize. Exactly one of renderNameSegs / renderNameExpr is set.

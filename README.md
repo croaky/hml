@@ -15,6 +15,24 @@ out, err := tmpl.Render(locals, partialFn)
 
 See `doc.go` for the grammar, security model, and value semantics.
 
+## One buffer per page
+
+`Render` returns a string. A page that renders a partial per row pays a
+buffer and a copy per row on that path. `RenderContextTo` writes into a
+buffer the caller owns, and a `PartialWriter` that calls it on the same
+buffer renders the whole page into one:
+
+```go
+var partial hml.PartialWriter
+partial = func(name string, ctx *hml.Context, w *strings.Builder) error {
+	return load(name).RenderContextTo(w, ctx, partial)
+}
+var w strings.Builder
+err := page.RenderContextTo(&w, hml.NewContext(locals), partial)
+```
+
+`RenderContext` and `PartialFunc` stay, and render the same bytes.
+
 ## Checking locals
 
 A parsed template reports what it reads, so an app can check its locals
