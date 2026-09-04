@@ -64,9 +64,10 @@ type SafeJS string
 type SafeCSS string
 
 // Parse parses hml source into a Template. transforms is the
-// app-registered set of rich-text builtins (see Transform); an unknown
-// `= name(field)` transform name is a Parse error, so the parser stays the
-// linter. A nil map registers no transforms.
+// app-registered set of rich-text builtins (see Transform). A name the
+// map does not hold compiles to an ordinary call on a helper func the
+// app injects as a local, so a misspelled transform name is a render
+// error rather than a Parse error. A nil map registers no transforms.
 func Parse(source, path string, transforms map[string]Transform) (*Template, error) {
 	rawLines := strings.Split(source, "\n")
 	// Remove trailing empty line from final newline

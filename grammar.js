@@ -86,7 +86,10 @@ module.exports = grammar({
       ),
 
     _shorthand: ($) =>
-      choice(alias($._class_immediate, $.class), alias($._id_immediate, $.id)),
+      choice(
+        alias($._class_immediate, $.class),
+        alias($._id_immediate, $.id),
+      ),
 
     tag_name: (_) => token(/%[a-zA-Z0-9_][a-zA-Z0-9_-]*/),
     class: (_) => token(CLASS),
@@ -130,14 +133,24 @@ module.exports = grammar({
     // Control
     conditional: ($) =>
       prec.right(
-        seq($.if_clause, repeat($.else_if_clause), optional($.else_clause)),
+        seq(
+          $.if_clause,
+          repeat($.else_if_clause),
+          optional($.else_clause),
+        ),
       ),
 
     if_clause: ($) =>
       seq("-", "if", field("condition", $._expr), optional($._block)),
 
     else_if_clause: ($) =>
-      seq("-", "else", "if", field("condition", $._expr), optional($._block)),
+      seq(
+        "-",
+        "else",
+        "if",
+        field("condition", $._expr),
+        optional($._block),
+      ),
 
     else_clause: ($) => seq("-", "else", optional($._block)),
 
@@ -202,7 +215,11 @@ module.exports = grammar({
         prec.left(PREC.and, seq($._expr, "&&", $._expr)),
         prec.left(
           PREC.cmp,
-          seq($._expr, choice("==", "!=", "<", "<=", ">", ">="), $._expr),
+          seq(
+            $._expr,
+            choice("==", "!=", "<", "<=", ">", ">="),
+            $._expr,
+          ),
         ),
       ),
 
@@ -242,7 +259,8 @@ module.exports = grammar({
         ),
       ),
 
-    _identifier_immediate: (_) => token.immediate(/[a-zA-Z_][a-zA-Z0-9_]*/),
+    _identifier_immediate: (_) =>
+      token.immediate(/[a-zA-Z_][a-zA-Z0-9_]*/),
 
     array: ($) =>
       seq("[", optional(seq(commaSep1($._expr), optional(","))), "]"),

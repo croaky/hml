@@ -12,12 +12,12 @@ import (
 	"github.com/croaky/is"
 )
 
-// Every tree-sitter corpus example claims to be hml, and no Checkfile
-// job runs the tree-sitter CLI, so nothing else stops the grammar's
-// examples from drifting into a language the engine does not have. This
-// is the half that can run without the CLI: the engine parses each
-// example. What the grammar makes of it is still verified by hand with
-// `tree-sitter test`.
+// Every tree-sitter corpus example claims to be hml. The Checkfile's
+// `grammar` job runs `tree-sitter test`, which says whether the grammar
+// builds the expected tree and nothing about whether the engine accepts
+// the source. This is that other half: the engine parses each example.
+// Without it a case can describe a language the engine rejects while
+// the grammar passes its own test saying otherwise.
 func TestCorpusParses(t *testing.T) {
 	is := is.New(t)
 

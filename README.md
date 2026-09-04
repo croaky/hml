@@ -87,8 +87,9 @@ transforms := map[string]hml.Transform{
 }
 ```
 
-Unregistered names are parse errors, so the parser stays the linter.
-The engine itself is stdlib-only.
+A name the map does not hold is not an error here. It compiles to a
+call on a helper func the app injects as a local, so a misspelled
+transform name is a render error. The engine itself is stdlib-only.
 
 ## Editors
 

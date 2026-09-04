@@ -46,9 +46,12 @@ stages, each its own file:
 - `render.go` — a compiled template plus a context to an HTML string,
   including the attribute policy and escaping.
 
-`api.go` is the exported surface: `Parse`, `Render`, `RenderContext`,
-`RenderContextTo`, `Names`, `Renders`, `HasCondition`, `PartialFunc`,
-`PartialWriter`, and the `Safe*` types. `doc.go` is documentation only.
+`api.go` holds most of the exported surface: `Parse`, `Template` with
+`Render`, `RenderContext`, `RenderContextTo`, `Names`, `Renders`, and
+`HasCondition`, the `Transform`, `PartialFunc`, and `PartialWriter` func
+types, and the `Safe*` types. `Context`, `NewContext`, and
+`Context.Child` sit in `expr.go`, beside the evaluator that reads them.
+`doc.go` is documentation only.
 
 `viewcover/` and `cmd/viewcover/` are the render-coverage check: the
 trace an app emits per resolved view, and the command that diffs a
@@ -94,28 +97,18 @@ tree-sitter test
 ```
 
 `generate` first, always: `tree-sitter test` reads `src/grammar.json`
-and fails without it. That ordering is why the `grammar` job runs both
-rather than just the second: with no C in the tree, a `grammar.js` the
-CLI cannot build is a grammar nobody can install, and generating is
-what catches it.
+and fails without it.
 
-`--js-runtime native` reads `grammar.js` with the QuickJS the CLI
-embeds. The default is `node`, and that default was the only thing on a
-CI worker that needed a JavaScript runtime, so the flag is what lets
-the worker have none. It pins the engine to whatever QuickJS the CLI
-vendors, which is a version to bump rather than a runtime to install. A
-`grammar.js` that required an npm package would break under it; this
-one is the DSL and nothing else.
-
-The job needs the CLI and a C compiler on the worker, installed by
-cibot's `scripts/provision-vm-workers.sh`.
+Keep `grammar.js` to the DSL and nothing else. `--js-runtime native`
+reads it with the QuickJS the CLI embeds, so a `grammar.js` that
+required an npm package would not build. The `Checkfile` says why the
+`grammar` job runs both commands and passes that flag.
 
 Whether an example is hml at all is a different question, and the
 CLI cannot answer it. `corpus_test.go` reads every
-`test/corpus/*.txt` source and hands it to `Parse`, which needs no CLI
-and runs in CI with the rest. Without it a corpus case can describe a
-language the engine rejects, and the grammar passes its own tests
-saying so.
+`test/corpus/*.txt` source and hands it to `Parse`. Without it a corpus
+case can describe a language the engine rejects, and the grammar passes
+its own tests saying so.
 
 What the grammar highlights is the shape of a call, not a list of
 names. Transforms and helpers are registered by the app, so a fixed
@@ -130,12 +123,16 @@ there:
 ```sh
 goimports -local "$(go list -m)" -w .
 go vet ./...
-go test -trimpath -race -cover ./...
+go test -trimpath -buildvcs=false -race -cover ./...
 git ls-files -z '*.go' | xargs -0 gopls check -severity=hint
+dprint fmt
+git ls-files -z '*.sh' 'scripts/*' | xargs -0 shellcheck
+tree-sitter generate --js-runtime native && tree-sitter test
 ```
 
-The local `goimports` writes; the `lint` job only reports, because a CI
-job that rewrites source has nowhere to put it.
+The local `goimports` and `dprint fmt` write; the `lint` and `fmt` jobs
+only report, because a CI job that rewrites source has nowhere to put
+it.
 
 The engine imports nothing outside the standard library, and that is the
 point of it: an app embeds hml to render pages, and a template language

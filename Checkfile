@@ -30,3 +30,15 @@ hints: git ls-files -z '*.go' | xargs -0 gopls check -severity=hint | awk '1; EN
 # so the command reads the same in both places, and so a laptop without
 # node does not pass CI and fail locally.
 grammar: tree-sitter generate --js-runtime native && tree-sitter test
+
+# What gofmt never reaches: the Markdown a reader reaches for before the
+# code, and `grammar.js`, the one JavaScript file here. dprint.json
+# names the plugins and their hashes, so a formatter upgrade is a commit
+# and not a Tuesday.
+fmt: dprint check
+
+# The shell nobody compiles. `scripts/tag` publishes a tag other people
+# fetch, and it runs on a laptop, where a mistake shows up as a version
+# nobody can use rather than as a failed build. It is named as a path
+# because it carries no extension.
+shellcheck: git ls-files -z '*.sh' 'scripts/*' | xargs -0 shellcheck

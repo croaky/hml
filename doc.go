@@ -223,9 +223,6 @@
 //	- if expr / - else if / - else  conditionals
 //	- for item in items             loops (optional index: for i, item)
 //	= render "name", key: val       partials
-//	= helper arg, key: val          allowlisted helper calls (Go funcs
-//	                                injected as locals, e.g. do_react,
-//	                                avatar_src, status_description)
 //	:javascript / :css              filter blocks
 //	-#                              comments (omitted from output)
 //	static text with #{field}       text interpolation (escaped)
