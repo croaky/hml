@@ -46,6 +46,29 @@ tmpl.Renders() // partials it renders by literal name
 `Names` answers for one file. A partial inherits its caller's locals, so
 follow `Renders` to check a whole page.
 
+## Render coverage
+
+`Parse` checks a condition's syntax and nothing about its type. A
+non-bool in an `- if` is a render error, so a view that no test renders
+is a view that nothing type-checks. `HasCondition` names the views that
+need such a test, and the `viewcover` package and command find the ones
+that lack it.
+
+The app calls `viewcover.Trace(path)` where it resolves a view. With
+`HML_TRACE` set, that prints the path to stdout once per process. A
+`-v` test run then carries one line per view it reached, and the
+command diffs that against the views with a condition:
+
+```sh
+go get -tool github.com/croaky/hml/cmd/viewcover
+HML_TRACE=1 go test -v ./... > run.txt
+go tool viewcover -views ui/views -trace run.txt
+```
+
+Stdout rather than a file so the run stays cacheable: Go's test cache
+replays what a binary printed and keys on the env vars it read, so an
+unchanged package replays its trace without running.
+
 ## Transforms
 
 The engine ships zero built-ins. Rich text renders through app-registered

@@ -1043,3 +1043,23 @@ func TestNamesDoesNotFollowPartials(t *testing.T) {
 	is.Eq(len(tmpl.Names()), 0)
 	is.True(slices.Equal(tmpl.Renders(), []string{"card"}))
 }
+
+// HasCondition answers for `- if` and `- else if`, however deep. A loop
+// binds a name and an output prints what it gets, so neither counts: a
+// wrong condition is the failure Parse cannot catch.
+func TestHasCondition(t *testing.T) {
+	for src, want := range map[string]bool{
+		"%p\n  Hello\n":                                                 false,
+		"- for row in rows\n  = row.name\n":                             false,
+		"= data.iffy\n":                                                 false,
+		"-# if data.has_rows\n":                                         false,
+		"%p\n  - if data.has_rows\n    %span\n":                         true,
+		"- if a\n  %p\n- else if b\n  %p\n":                             true,
+		"- for row in rows\n  %li\n    - if row.on\n      = row.name\n": true,
+	} {
+		tmpl := mustParse(t, src)
+		if tmpl.HasCondition() != want {
+			t.Errorf("HasCondition(%q) = %v, want %v", src, !want, want)
+		}
+	}
+}

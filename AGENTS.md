@@ -34,8 +34,8 @@ error message stay as they are.
 
 ## Architecture
 
-One package at the repo root. Source moves through four stages, each
-its own file:
+The engine is one package at the repo root. Source moves through four
+stages, each its own file:
 
 - `parse.go` — lines and indentation to a `[]node` tree. Knows nothing
   about expressions.
@@ -47,8 +47,14 @@ its own file:
   including the attribute policy and escaping.
 
 `api.go` is the exported surface: `Parse`, `Render`, `RenderContext`,
-`RenderContextTo`, `Names`, `Renders`, `PartialFunc`, `PartialWriter`,
-and the `Safe*` types. `doc.go` is documentation only.
+`RenderContextTo`, `Names`, `Renders`, `HasCondition`, `PartialFunc`,
+`PartialWriter`, and the `Safe*` types. `doc.go` is documentation only.
+
+`viewcover/` and `cmd/viewcover/` are the render-coverage check: the
+trace an app emits per resolved view, and the command that diffs a
+traced test run against the views with a condition. They import the
+engine; the engine does not import them. The package doc says why the
+trace goes to stdout.
 
 Render does no work Parse can do. An expression compiles to an AST at
 Parse, a literal is boxed once there, and a tag whose attributes are

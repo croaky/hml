@@ -42,10 +42,11 @@ func adaptPartial(fn PartialFunc) PartialWriter {
 
 // Template is a parsed hml template.
 type Template struct {
-	path    string
-	nodes   []node
-	names   []string
-	renders []string
+	path         string
+	nodes        []node
+	names        []string
+	renders      []string
+	hasCondition bool
 }
 
 // SafeString marks trusted HTML that should not be escaped when rendered with
@@ -84,8 +85,14 @@ func Parse(source, path string, transforms map[string]Transform) (*Template, err
 	if err := compileNodes(nodes, path, transforms); err != nil {
 		return nil, err
 	}
-	names, renders := collectNames(nodes)
-	return &Template{path: path, nodes: nodes, names: names, renders: renders}, nil
+	names, renders, hasCondition := collectNames(nodes)
+	return &Template{
+		path:         path,
+		nodes:        nodes,
+		names:        names,
+		renders:      renders,
+		hasCondition: hasCondition,
+	}, nil
 }
 
 // Names returns the free top-level identifiers this template reads,
@@ -102,18 +109,26 @@ func (t *Template) Names() []string { return t.names }
 // omitted.
 func (t *Template) Renders() []string { return t.renders }
 
+// HasCondition reports whether the template holds an `- if` or an
+// `- else if`. Parse checks a condition's syntax and nothing about its
+// type: the type is the handler's to know, so a wrong one is a render
+// error. A template with a condition therefore needs a test that
+// renders it, and this is how a caller finds the ones that need one.
+// See package viewcover.
+func (t *Template) HasCondition() bool { return t.hasCondition }
+
 // collectNames walks the compiled tree once, at the end of Parse, for
-// the free names it reads and the literal partials it renders. Both
-// answers are fixed by the tree, so a caller asking per render should
-// not pay for the walk.
-func collectNames(nodes []node) (names, renders []string) {
+// the free names it reads, the literal partials it renders, and whether
+// it holds a condition. All three answers are fixed by the tree, so a
+// caller asking per render should not pay for the walk.
+func collectNames(nodes []node) (names, renders []string, hasCondition bool) {
 	w := &nameWalk{
 		names:   map[string]bool{},
 		renders: map[string]bool{},
 		bound:   map[string]int{},
 	}
 	w.walkNodes(nodes)
-	return sortedKeys(w.names), sortedKeys(w.renders)
+	return sortedKeys(w.names), sortedKeys(w.renders), w.hasCondition
 }
 
 func sortedKeys(set map[string]bool) []string {
@@ -132,9 +147,10 @@ func sortedKeys(set map[string]bool) []string {
 // variables in scope by name, so a name shadowed by an enclosing loop is
 // free again once that loop's body ends.
 type nameWalk struct {
-	names   map[string]bool
-	renders map[string]bool
-	bound   map[string]int
+	names        map[string]bool
+	renders      map[string]bool
+	bound        map[string]int
+	hasCondition bool
 }
 
 func (w *nameWalk) walkNodes(nodes []node) {
@@ -147,7 +163,10 @@ func (w *nameWalk) walkNodes(nodes []node) {
 			for _, segs := range n.filterSegs {
 				w.walkInterp(segs)
 			}
-		case kindOutput, kindTransform, kindIf, kindElseIf:
+		case kindIf, kindElseIf:
+			w.hasCondition = true
+			w.walkExpr(n.exprAST)
+		case kindOutput, kindTransform:
 			w.walkExpr(n.exprAST)
 		case kindTag:
 			for _, a := range n.attrs {
