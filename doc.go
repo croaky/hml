@@ -119,6 +119,9 @@
 // template states (- if s != "", - if n > 0, - if p == nil), or as a
 // bool the handler computed (- if co.HasWebsite).
 //
+// See package viewcover to find views with a condition that no test
+// renders.
+//
 // ! is held to the same rule, because it is a conditional written
 // backwards: were it exempt, - if title would be an error and
 // - if !title the same guess with the branches swapped.
@@ -164,7 +167,9 @@
 // dereferenced), matching an exported field by its json tag, its db tag,
 // or its name case-insensitively. Unexported fields are invisible to a
 // template. A missing key or field is a render error, not an empty
-// value, so a typo fails loudly instead of rendering blank.
+// value, so a typo fails loudly instead of rendering blank. Because
+// missing locals fail at render time, tests must render each view to
+// check fields. See package viewcover.
 //
 // # Output shape
 //
