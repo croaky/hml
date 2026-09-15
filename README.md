@@ -46,6 +46,50 @@ tmpl.Renders() // partials it renders by literal name
 `Names` answers for one file. A partial inherits its caller's locals, so
 follow `Renders` to check a whole page.
 
+Check at startup that each template resolves all literal partials:
+
+```go
+for path, tmpl := range templates {
+	for _, name := range tmpl.Renders() {
+		if _, ok := templates[name]; !ok {
+			log.Fatalf("%s: missing partial %q", path, name)
+		}
+	}
+}
+```
+
+## HTTP handler
+
+An HTTP handler prepares locals, resolves partials, and renders HTML
+into the response:
+
+```go
+func handleShow(w http.ResponseWriter, r *http.Request) {
+	locals := map[string]any{
+		"title": "Projects",
+		"items": []string{"Alpha", "Beta"},
+	}
+
+	var partial hml.PartialWriter
+	partial = func(name string, ctx *hml.Context, b *strings.Builder) error {
+		tmpl, ok := templates[name]
+		if !ok {
+			return fmt.Errorf("unknown partial %q", name)
+		}
+		return tmpl.RenderContextTo(b, ctx, partial)
+	}
+
+	var buf strings.Builder
+	if err := templates["show"].RenderContextTo(&buf, hml.NewContext(locals), partial); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	io.WriteString(w, buf.String())
+}
+```
+
 ## Render coverage
 
 `Parse` checks a condition's syntax and nothing about its type. A
