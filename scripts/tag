@@ -4,13 +4,13 @@
 #
 #   scripts/tag v0.2.0
 #
-# cibot is origin and holds the code; GitHub holds `main`, mirrored by
-# the farmer's merge, and the tags a consumer resolves against. cibot
+# sockeye is origin and holds the code; GitHub holds `main`, mirrored by
+# sockeye's merge, and the tags a consumer resolves against. sockeye
 # itself has no use for a tag, so one is never pushed there -- this
 # sends it straight to the module path, which is the address `go get`
 # already uses and so needs no second thing to configure.
 #
-# Uses your own github.com credentials, the ones `cibot git setup`
+# Uses your own github.com credentials, the ones `soc git setup`
 # deliberately leaves alone.
 set -euo pipefail
 
@@ -50,18 +50,18 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 # The base branch is whatever origin points HEAD at, so this reads the
-# same answer cibot has for the repo rather than assuming main.
+# same answer sockeye has for the repo rather than assuming main.
 base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || echo "")
 base=${base#origin/}
 base=${base:-main}
 
 branch=$(git symbolic-ref --quiet --short HEAD || echo "")
 if [ "$branch" != "$base" ]; then
-  echo "on $branch, not $base; tag what cibot merged" >&2
+  echo "on $branch, not $base; tag what sockeye merged" >&2
   exit 1
 fi
 
-# Tag the merged tip, not a local one. A change merges on the farmer,
+# Tag the merged tip, not a local one. A change merges on the sockeye server,
 # so a local main that has not caught up would tag a commit nobody
 # else has.
 git fetch --quiet origin "$base"
@@ -84,7 +84,7 @@ fi
 git tag -a "$version" -m "$version"
 
 # Only the tag. A wider refspec would push main from a laptop, and
-# main is the farmer's to write.
+# main is sockeye's to write.
 if ! git push "$url" "refs/tags/$version"; then
   # Leave nothing half-done: a local tag for a version nobody can
   # fetch is the state that makes the next attempt confusing.

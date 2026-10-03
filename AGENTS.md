@@ -121,7 +121,7 @@ same things before committing, since a check that fails locally fails
 there:
 
 ```sh
-goimports -local "$(go list -m)" -w .
+go run golang.org/x/tools/cmd/goimports@v0.45.0 -local "$(go list -m)" -w .
 go vet ./...
 go test -trimpath -buildvcs=false -race -cover ./...
 git ls-files -z '*.go' | xargs -0 gopls check -severity=hint
@@ -186,19 +186,19 @@ than leaving a record of work already done.
 
 ## Changes
 
-Work happens on a cibot change. `cibot checkout` allocates one and
-prints a worktree; `cibot edit` sets its title and description. Do the
+Work happens on a sockeye change. `soc checkout` allocates one and
+prints a worktree; `soc edit` sets its title and description. Do the
 edit before the code, not after. A change with neither is a blank row on
-the dashboard and a blank `cibot show`, so nobody looking at either can
+the dashboard and a blank `soc show`, so nobody looking at either can
 tell what it is or whether it overlaps what they are about to start. A
 rough sentence beats an empty one, and the description gets rewritten
 before the merge anyway.
 
-After a push, read the checks with `git push && cibot show --wait`
-rather than sleeping and then reading. The farmer holds the request open
+After a push, read the checks with `git push && soc show --wait`
+rather than sleeping and then reading. The server holds the request open
 and answers within a second of the last check, so a sleep is either time
 spent waiting for an answer that already arrived or too short to reach
-one. Too short is the worse half: a `cibot show` that lands before the
+one. Too short is the worse half: a `soc show` that lands before the
 push is recorded reports the previous commit's checks, green, about the
 wrong code. `--wait` follows the commit in the worktree it runs in,
 exits nonzero when a check failed, and gives up after ten minutes
@@ -218,11 +218,11 @@ exits nonzero when a check failed, and gives up after ten minutes
 
 ## Releases
 
-cibot is origin and holds no tags. `scripts/tag vX.Y.Z` publishes one
+sockeye is origin and holds no tags. `scripts/tag vX.Y.Z` publishes one
 annotated tag to the GitHub mirror, which is what a `go get` resolves.
 
 No user should discover a break from a tag. `scripts/tag` refuses a
-dirty tree and a `main` behind the farmer's, but it cannot know whether
+dirty tree and a `main` behind the server's, but it cannot know whether
 the code is any good to the repos that will fetch it. So before tagging,
 point each user at the working tree:
 

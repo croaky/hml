@@ -1,5 +1,5 @@
 # -trimpath and -buildvcs=false keep a test binary a function of its
-# source alone. Without them a worker's slot path and the commit stamp
+# source alone. Without them a runner's slot path and the commit stamp
 # are built in, so a result cached by one slot never counts for
 # another and every run starts cold.
 test: go test -trimpath -buildvcs=false -race -cover ./...
@@ -9,7 +9,13 @@ test: go test -trimpath -buildvcs=false -race -cover ./...
 # of its own. -l lists what it would rewrite, and a non-empty list is
 # the failure, since a CI job that rewrote source would have nowhere to
 # put it.
-lint: out=$(goimports -local "$(go list -m)" -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi; go vet ./...
+#
+# go run at a pinned version, not a tool directive: a tool line in
+# go.mod puts x/tools in the module graph of every app that imports
+# hml. The runner installs no goimports, so this is also how CI gets
+# one. go run sends its download lines to stderr, which out= does not
+# read.
+lint: out=$(go run golang.org/x/tools/cmd/goimports@v0.45.0 -local "$(go list -m)" -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi; go vet ./...
 
 # gopls at hint severity is what an editor underlines and nobody
 # reading a diff sees. It exits 0 whether or not it found anything, so
@@ -21,12 +27,12 @@ hints: git ls-files -z '*.go' | xargs -0 gopls check -severity=hint | awk '1; EN
 # grammar.js the CLI cannot build is a grammar nobody can install.
 # `test` then compiles that parser and runs the corpus, which is why it
 # needs a C compiler as well as the CLI. Both come from
-# cibot's scripts/provision-vm-workers.sh.
+# sockeye's scripts/provision-vm-runners.sh.
 #
 # --js-runtime native reads grammar.js with the QuickJS the CLI already
-# embeds. The default is node, which was the only reason a worker or a
+# embeds. The default is node, which was the only reason a runner or a
 # laptop needed a JavaScript runtime at all: nothing else here runs
-# JavaScript. The flag lives here rather than in a worker's environment
+# JavaScript. The flag lives here rather than in a runner's environment
 # so the command reads the same in both places, and so a laptop without
 # node does not pass CI and fail locally.
 grammar: tree-sitter generate --js-runtime native && tree-sitter test

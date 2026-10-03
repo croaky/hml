@@ -18,8 +18,8 @@ func TestLoneTextChildRendersInline(t *testing.T) {
 	}{
 		{
 			name: "anchor with text",
-			src:  "%a{ href: \"/\" }\n  cibot",
-			want: "<a href=\"/\">cibot</a>\n",
+			src:  "%a{ href: \"/\" }\n  sockeye",
+			want: "<a href=\"/\">sockeye</a>\n",
 		},
 		{
 			name:   "output expression",
@@ -50,8 +50,8 @@ func TestLoneTextChildRendersInline(t *testing.T) {
 			// The newline between siblings is what spaces words in a
 			// row, and it is untouched.
 			name: "siblings keep the newline between them",
-			src:  "%nav\n  %a{ href: \"/\" }\n    cibot\n  %a{ href: \"/merged\" }\n    merged",
-			want: "<nav>\n<a href=\"/\">cibot</a>\n<a href=\"/merged\">merged</a>\n</nav>\n",
+			src:  "%nav\n  %a{ href: \"/\" }\n    sockeye\n  %a{ href: \"/merged\" }\n    merged",
+			want: "<nav>\n<a href=\"/\">sockeye</a>\n<a href=\"/merged\">merged</a>\n</nav>\n",
 		},
 		{
 			// A pre's whitespace is its content, and the leading spaces
