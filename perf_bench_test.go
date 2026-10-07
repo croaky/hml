@@ -185,3 +185,35 @@ func BenchmarkToAnySlice(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkRenderLoopConditional renders an if/else if/else chain per
+// loop item, with a tag of each layout in the branches.
+func BenchmarkRenderLoopConditional(b *testing.B) {
+	src := "%ul\n" +
+		"  - for row in rows\n" +
+		"    - if row.id == 0\n" +
+		"      %li.first\n" +
+		"        = row.name\n" +
+		"    - else if row.cls == \"x\"\n" +
+		"      %li.x\n" +
+		"    - else\n" +
+		"      %li\n" +
+		"        %span\n" +
+		"          = row.name\n" +
+		"        %br\n"
+	tmpl, err := Parse(src, "bench.hml", nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	rows := make([]benchRow, 100)
+	for i := range rows {
+		rows[i] = benchRow{Name: fmt.Sprintf("Row %d", i), Cls: "row", ID: int64(i)}
+	}
+	locals := map[string]any{"rows": rows}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := tmpl.Render(locals, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

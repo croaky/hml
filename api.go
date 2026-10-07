@@ -352,8 +352,16 @@ type node struct {
 	// and escaping the same values every time.
 	staticAttrs    string
 	attrsAreStatic bool
-	textSegs       []interpSeg   // static text interpolation
-	filterSegs     [][]interpSeg // filter lines, indent stripped, per line
+	// layout is how a tag writes its content. compileNodes sets it
+	// from the tag name and the children, which do not change after
+	// Parse, so renderTag does not look them up on each render.
+	layout tagLayout
+	// elseCount is the number of - else if and - else siblings that
+	// follow a - if. compileNodes counts them, so renderNodes takes
+	// the chain as a slice of the nodes it already holds.
+	elseCount  int
+	textSegs   []interpSeg   // static text interpolation
+	filterSegs [][]interpSeg // filter lines, indent stripped, per line
 
 	// Compiled render call (kindRender), replacing per-render regexp +
 	// tokenize. Exactly one of renderNameSegs / renderNameExpr is set.

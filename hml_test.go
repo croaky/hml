@@ -1063,3 +1063,38 @@ func TestHasCondition(t *testing.T) {
 		}
 	}
 }
+
+// Parse settles how each tag lays out its content, so a render reads
+// one field and does not look up the tag name or count the children.
+func TestParseSettlesTagLayout(t *testing.T) {
+	for src, want := range map[string]tagLayout{
+		"%br\n":                    layoutVoid,
+		"%p\n":                     layoutEmpty,
+		"%pre\n":                   layoutEmpty,
+		"%pre\n  = patch\n":        layoutPreserve,
+		"%textarea\n  hello\n":     layoutPreserve,
+		"%a\n  home\n":             layoutInline,
+		"%p\n  = name\n":           layoutInline,
+		"%p\n  = markdown(body)\n": layoutInline,
+		"%p\n  one\n  two\n":       layoutBlock,
+		"%p\n  %span\n":            layoutBlock,
+		"%p\n  - if a\n    x\n":    layoutBlock,
+	} {
+		tmpl := mustParse(t, src)
+		if got := tmpl.nodes[0].layout; got != want {
+			t.Errorf("layout(%q) = %d, want %d", src, got, want)
+		}
+	}
+}
+
+// Parse counts the - else if and - else siblings after each - if, so
+// a render takes the chain as a slice of the nodes it already has.
+func TestParseCountsElseBranches(t *testing.T) {
+	is := is.New(t)
+	tmpl := mustParse(t, "- if a\n  x\n- else if b\n  y\n- else\n  z\n- if c\n  w\n%p\n")
+	is.Eq(tmpl.nodes[0].elseCount, 2)
+	is.Eq(tmpl.nodes[3].elseCount, 0)
+
+	nested := mustParse(t, "%div\n  - if a\n    x\n  - else\n    y\n")
+	is.Eq(nested.nodes[0].children[0].elseCount, 1)
+}

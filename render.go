@@ -68,12 +68,10 @@ func renderNodes(nodes []node, buf *strings.Builder, ctx context, partialFn Part
 				return err
 			}
 		case kindIf:
-			// collect if/else if/else chain
-			chain := []node{n}
-			for i+1 < len(nodes) && (nodes[i+1].kind == kindElseIf || nodes[i+1].kind == kindElse) {
-				i++
-				chain = append(chain, nodes[i])
-			}
+			// compileNodes counted the - else if and - else
+			// siblings, so the chain is a slice of nodes.
+			chain := nodes[i : i+1+n.elseCount]
+			i += n.elseCount
 			if err := renderConditional(chain, buf, ctx, partialFn, path); err != nil {
 				return err
 			}
@@ -96,7 +94,7 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialWrite
 	// the opening tag is written. Evaluating it first, rather than
 	// rendering it into a second buffer, is what lets the tag choose
 	// its layout without a copy.
-	if len(n.children) > 0 && !voidElements[tag] && !preserveElements[tag] && loneTextChild(n.children) {
+	if n.layout == layoutInline {
 		text, err := renderLeaf(n.children[0], ctx, path)
 		if err != nil {
 			return err
@@ -132,30 +130,28 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialWrite
 		return err
 	}
 
-	if voidElements[tag] {
+	switch n.layout {
+	case layoutVoid:
 		buf.WriteString(">\n")
 		return nil
-	}
-
-	if len(n.children) > 0 {
-		if preserveElements[tag] {
-			// A preserve element keeps its lines regardless; there
-			// the whitespace is the content.
-			var inner strings.Builder
-			if err := renderNodes(n.children, &inner, ctx, partialFn, path); err != nil {
-				return err
-			}
-			buf.WriteByte('>')
-			buf.WriteString(trimRenderedNewline(inner.String()))
-		} else {
-			buf.WriteString(">\n")
-			if err := renderNodes(n.children, buf, ctx, partialFn, path); err != nil {
-				return err
-			}
+	case layoutEmpty:
+		buf.WriteString("></")
+	case layoutPreserve:
+		// A preserve element keeps its lines regardless; there
+		// the whitespace is the content.
+		var inner strings.Builder
+		if err := renderNodes(n.children, &inner, ctx, partialFn, path); err != nil {
+			return err
+		}
+		buf.WriteByte('>')
+		buf.WriteString(trimRenderedNewline(inner.String()))
+		buf.WriteString("</")
+	default:
+		buf.WriteString(">\n")
+		if err := renderNodes(n.children, buf, ctx, partialFn, path); err != nil {
+			return err
 		}
 		buf.WriteString("</")
-	} else {
-		buf.WriteString("></")
 	}
 	buf.WriteString(tag)
 	buf.WriteString(">\n")
@@ -417,7 +413,8 @@ func isSchemeChar(c byte) bool {
 // instead; see neverBool. This is for the rest, which is most of them:
 // a field's type is the handler's to know.
 func renderConditional(chain []node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
-	for _, n := range chain {
+	for i := range chain {
+		n := &chain[i]
 		switch n.kind {
 		case kindIf, kindElseIf:
 			val, err := evaluate(n.exprAST, ctx)

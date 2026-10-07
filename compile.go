@@ -29,6 +29,11 @@ type interpSeg struct {
 func compileNodes(nodes []node, path string, transforms map[string]Transform) error {
 	for i := range nodes {
 		n := &nodes[i]
+		if n.kind == kindIf {
+			for j := i + 1; j < len(nodes) && (nodes[j].kind == kindElseIf || nodes[j].kind == kindElse); j++ {
+				n.elseCount++
+			}
+		}
 		switch n.kind {
 		case kindText:
 			segs, err := compileInterp(n.text)
@@ -109,6 +114,11 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 		if err := compileNodes(n.children, path, transforms); err != nil {
 			return err
 		}
+		// The layout reads the kind of each child, and compileNodes
+		// turns a call child into an output or a transform above.
+		if n.kind == kindTag {
+			n.layout = layoutOf(n.tag, n.children)
+		}
 	}
 	return nil
 }
@@ -136,6 +146,39 @@ func hoistStaticAttrs(n *node, path string) error {
 	n.staticAttrs = buf.String()
 	n.attrsAreStatic = true
 	return nil
+}
+
+// tagLayout is how renderTag writes a tag's content.
+type tagLayout int
+
+const (
+	// layoutBlock puts the children on the lines below the opening tag.
+	layoutBlock tagLayout = iota
+	// layoutEmpty writes the closing tag right after the opening tag.
+	layoutEmpty
+	// layoutVoid writes no closing tag and no children.
+	layoutVoid
+	// layoutPreserve writes the children with their whitespace kept.
+	layoutPreserve
+	// layoutInline puts a lone text child on the line of the tag.
+	layoutInline
+)
+
+// layoutOf gives the layout of a tag from its name and children. A void
+// element ignores its children, and a preserve element keeps a lone
+// text child on lines of its own.
+func layoutOf(tag string, children []node) tagLayout {
+	switch {
+	case voidElements[tag]:
+		return layoutVoid
+	case len(children) == 0:
+		return layoutEmpty
+	case preserveElements[tag]:
+		return layoutPreserve
+	case loneTextChild(children):
+		return layoutInline
+	}
+	return layoutBlock
 }
 
 // neverBool names the literal kind of a condition that cannot be a bool
