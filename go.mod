@@ -1,5 +1,5 @@
 module github.com/croaky/hml
 
-go 1.26
+go 1.27.3
 
 require github.com/croaky/is v0.2.0
