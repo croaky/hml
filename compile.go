@@ -128,16 +128,29 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 // The result is what writeAttrs would write on every render, so the
 // render writes it instead. A literal is authored, so the attribute
 // policy answers the same at Parse as it would at render.
+//
+// It asks the policy about each string literal on every tag, not only
+// a static one. A refused literal fails on every render, so it fails
+// here, also on a tag in a branch that no test renders.
 func hoistStaticAttrs(n *node, path string) error {
+	static := true
 	for _, a := range n.attrs {
 		if a.splat {
-			return nil
+			static = false
+			continue
 		}
 		switch a.val.typ {
-		case astString, astNumber, astBool, astNil:
+		case astString:
+			if _, err := policyAttr(attrVal{key: a.key, val: toAttrVal(a.val.lit), authored: true}); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+		case astNumber, astBool, astNil:
 		default:
-			return nil
+			static = false
 		}
+	}
+	if !static {
+		return nil
 	}
 	var buf strings.Builder
 	if err := writeAttrsDynamic(*n, &buf, nil, path); err != nil {

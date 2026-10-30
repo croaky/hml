@@ -683,8 +683,9 @@ func TestEntityHeaderTemplate(t *testing.T) {
 	is.True(strings.Contains(got, "border-radius:4px"))
 }
 
-// #ZgotmplZ is a sentinel, not a link target: it marks a URL the
-// renderer refused, and matches what html/template emits.
+// about:invalid#ZgotmplZ marks a URL the renderer refused. A browser
+// fetches nothing for it, where a bare #ZgotmplZ resolves to the page
+// itself and an img or an icon link loads the page again.
 func TestURLAttributeRejectsUnsafeScheme(t *testing.T) {
 	is := is.New(t)
 	for _, url := range []string{
@@ -696,13 +697,39 @@ func TestURLAttributeRejectsUnsafeScheme(t *testing.T) {
 		"vbscript:msgbox",
 	} {
 		got := mustRender(t, "%a{ href: u }\n  x\n", map[string]any{"u": url})
-		is.True(strings.Contains(got, `href="#ZgotmplZ"`))
+		is.True(strings.Contains(got, `href="about:invalid#ZgotmplZ"`))
 		is.True(!strings.Contains(got, "alert"))
 	}
 
 	// Every URL attribute, not just href.
 	got := mustRender(t, "%img{ src: u }\n", map[string]any{"u": "javascript:alert(1)"})
-	is.True(strings.Contains(got, `src="#ZgotmplZ"`))
+	is.True(strings.Contains(got, `src="about:invalid#ZgotmplZ"`))
+}
+
+// A literal URL with a refused scheme renders the sentinel on every
+// render, so it is a mistake and not data. Parse refuses one typed on
+// a tag, also on a tag that reads a local. Render refuses one that
+// arrives through a partial argument. A literal with an allowed scheme
+// still parses.
+func TestLiteralUnsafeURLIsAnError(t *testing.T) {
+	is := is.New(t)
+
+	_, err := Parse(`%link{ rel: "icon", href: "data:image/svg+xml,<svg/>" }`+"\n", "layout.hml", nil)
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "layout.hml"))
+	is.True(strings.Contains(err.Error(), "attribute href"))
+
+	_, err = Parse(`%a{ href: "javascript:go()", title: title }`+"\n  x\n", "test.hml", nil)
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "attribute href"))
+
+	tmpl := mustParse(t, `= render "p", u: "javascript:go()"`+"\n")
+	_, err = tmpl.Render(nil, partialFor(t, "p", "%a{ href: u }\n  x\n"))
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "attribute href"))
+
+	got := mustRender(t, `%link{ rel: "icon", href: "https://example.com/favicon.ico" }`+"\n", nil)
+	is.True(strings.Contains(got, `href="https://example.com/favicon.ico"`))
 }
 
 func TestURLAttributeAllowsRelativeAndAllowlistedSchemes(t *testing.T) {
@@ -861,14 +888,14 @@ func TestStaticAttributesHoistedAtParse(t *testing.T) {
 
 // The attribute policy answers the same for a literal at Parse as it
 // would at Render, so hoisting changes when it runs and not what it
-// says: a literal URL with a refused scheme is still the sentinel, and
-// a literal on* handler is still authored.
+// says: a literal URL with a refused scheme is still an error, and a
+// literal on* handler is still authored.
 func TestStaticAttributesKeepThePolicy(t *testing.T) {
 	is := is.New(t)
-	got := mustRender(t, `%a{ href: "javascript:alert(1)" }`+"\n  x\n", nil)
-	is.True(strings.Contains(got, `href="#ZgotmplZ"`))
+	_, err := Parse(`%a{ href: "javascript:alert(1)" }`+"\n  x\n", "test.hml", nil)
+	is.HasErr(err)
 
-	got = mustRender(t, `%button{ onclick: "APP.close()" }`+"\n  x\n", nil)
+	got := mustRender(t, `%button{ onclick: "APP.close()" }`+"\n  x\n", nil)
 	is.True(strings.Contains(got, `onclick="APP.close()"`))
 
 	got = mustRender(t, `%p{ title: "a <c> & 'd'" }`+"\n  x\n", nil)

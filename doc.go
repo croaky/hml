@@ -36,14 +36,21 @@
 //   - Attribute values are constrained by the context the attribute
 //     puts them in. A URL attribute (href, src, action, formaction,
 //     poster, cite, background, ping, xlink:href) takes a relative URL
-//     or one of http, https, mailto, tel; anything else renders as the
-//     sentinel #ZgotmplZ, as in html/template, so javascript:alert(1)
-//     never reaches the browser. An on* attribute is a JavaScript
-//     context and a style attribute a CSS context: each takes code the
-//     template author wrote, which is application source, or a value
-//     the handler marked SafeJS or SafeCSS. A plain dynamic value there
-//     is a render error, because no escaping makes untrusted data safe
-//     as code.
+//     or one of http, https, mailto, tel. A value from data with any
+//     other scheme renders as the sentinel about:invalid#ZgotmplZ, so
+//     javascript:alert(1) never reaches the browser. The about:invalid
+//     scheme makes the browser fetch nothing. A bare #ZgotmplZ, as in
+//     html/template, resolves to the page itself, so an img or an icon
+//     link that held it loaded the page a second time. A string literal
+//     with a refused scheme is an error: it can only ever render the
+//     sentinel, so it is a mistake. Parse refuses one typed on a tag,
+//     and render refuses one that arrives through a partial argument.
+//
+//     An on* attribute is a JavaScript context and a style attribute a
+//     CSS context: each takes code the template author wrote, which is
+//     application source, or a value the handler marked SafeJS or
+//     SafeCSS. A plain dynamic value there is a render error, because
+//     no escaping makes untrusted data safe as code.
 //
 //     Code the author wrote means a string literal, wherever it was
 //     typed. It stays authored through a hash literal, a partial

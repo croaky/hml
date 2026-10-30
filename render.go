@@ -326,21 +326,25 @@ var urlSchemes = map[string]bool{
 }
 
 // unsafeURL replaces a rejected URL. It is a sentinel, not a link
-// target: the name matches html/template so the two engines fail the
-// same way and the string is greppable in rendered output.
-const unsafeURL = "#ZgotmplZ"
+// target. The about:invalid scheme makes a browser fetch nothing for
+// it. A bare fragment resolves to the page itself, so an img src or an
+// icon link that held one loaded the page again. The fragment keeps
+// html/template's name, so the string is greppable in rendered output.
+const unsafeURL = "about:invalid#ZgotmplZ"
 
 // policyAttr constrains a value by the context its attribute puts it in.
 // hml needs no HTML state machine for this the way html/template does:
 // the renderer holds the attribute name and the value together, so it
 // can decide per attribute.
 //
-// URL attributes take only relative URLs and an allowlisted scheme. on*
-// and style attributes are code, so they take code the template author
-// wrote — that is application source — or a value the handler marked
-// SafeJS or SafeCSS. A plain dynamic value in either is an error rather
-// than an escape, because there is no escaping that makes untrusted data
-// safe as code.
+// URL attributes take only relative URLs and an allowlisted scheme. A
+// refused value from data becomes the sentinel. A refused literal is an
+// error: it would be the sentinel on every render, so it is a mistake
+// in the template. on* and style attributes are code, so they take code
+// the template author wrote — that is application source — or a value
+// the handler marked SafeJS or SafeCSS. A plain dynamic value in either
+// is an error rather than an escape, because there is no escaping that
+// makes untrusted data safe as code.
 //
 // Where the author wrote it does not enter into it. A string literal is
 // authored wherever it is typed, and it stays so through a hash literal,
@@ -351,6 +355,9 @@ func policyAttr(a attrVal) (string, error) {
 	switch {
 	case urlAttrs[name]:
 		if !safeURL(a.val) {
+			if a.authored {
+				return "", fmt.Errorf("attribute %s: literal URL needs a relative path or an http, https, mailto, or tel scheme", a.key)
+			}
 			return unsafeURL, nil
 		}
 	case strings.HasPrefix(name, "on"):
