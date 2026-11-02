@@ -10,12 +10,11 @@ test: go test -trimpath -buildvcs=false -race -cover ./...
 # the failure, since a CI job that rewrote source would have nowhere to
 # put it.
 #
-# go run at a pinned version, not a tool directive: a tool line in
-# go.mod puts x/tools in the module graph of every app that imports
-# hml. The runner installs no goimports, so this is also how CI gets
-# one. go run sends its download lines to stderr, which out= does not
-# read.
-lint: out=$(go run golang.org/x/tools/cmd/goimports@v0.45.0 -local "$(go list -m)" -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi; go vet ./...
+# tools.mod pins goimports, not go.mod: a tool line in go.mod puts
+# x/tools in the module graph of every app that imports hml. The
+# runner installs no goimports, so this is also how CI gets one. go
+# tool sends its download lines to stderr, which out= does not read.
+lint: out=$(go tool -modfile=tools.mod goimports -local "$(go list -m)" -l .); if [ -n "$out" ]; then echo "$out"; exit 1; fi; go vet ./...
 
 # gopls at hint severity is what an editor underlines and nobody
 # reading a diff sees. It exits 0 whether or not it found anything, so
@@ -49,7 +48,10 @@ fmt: dprint check
 # because it carries no extension.
 shellcheck: git ls-files -z '*.sh' 'scripts/*' | xargs -0 shellcheck
 
-weekly_govulncheck: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+# govulncheck builds from tools.mod and then reads go.mod, so it scans
+# the versions hml ships. It reads the live vulnerability database, so
+# a new advisory fails this check without a commit.
+weekly_govulncheck: go tool -modfile=tools.mod govulncheck ./...
 
 # The title a change needs to merge, and the body rules that come
 # with it. sockeye reads this from main at merge.
