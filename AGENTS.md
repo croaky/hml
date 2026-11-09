@@ -235,19 +235,27 @@ then `soc push --force`. A plain push after a sync stops and says so.
 
 ## Commits
 
-- Prefix with the stage the change acts on: `parse:`, `compile:`,
-  `expr:`, `render:`, `api:`, `doc:`, `test:`, `todo:`, `ci:`,
-  `grammar:` for the tree-sitter files. Not
-  `hml:` — every commit here is hml, so it says nothing.
-- A change touching several stages takes the one whose behavior
-  changed, not the one with the most lines.
-- Imperative mood, lowercase except proper nouns. Hard-wrap at 72.
-- Include _why_, not just _what_. See `git log` for examples.
+- Subject: `scope: imperative summary`, at most 72 characters, lowercase
+  except proper nouns, no trailing period.
+- The scope is what the change acts on: the stage (`parse:`, `compile:`,
+  `expr:`, `render:`), `api:`, `test:`, or `grammar:` for the
+  tree-sitter files. Not `hml:`, because every commit here is hml.
+- Each repo also uses these scopes: `security:` for a fix to a security
+  finding, `deps:` for a dependency or the Go version, `doc:` for the
+  docs, `todo:` for a plan, and `ci:` for the Checkfile and its checks.
+- A change that acts on more than one area takes the scope whose
+  behavior changed. Write two scopes, with a comma between them, only
+  when each one changed: `parse, render:`.
+- The `merge:` line in the root `Checkfile` checks the change title at
+  merge. It caps the text after the scope at 64 characters.
+- Include _why_, not just _what_. Hard-wrap the body at 72.
 - Write the subject for a teammate who has not read the code. Name the
   stage, the function, or the output, not a term the change makes up.
 - Write the body as a change description (below). The first push of a
   branch with one commit copies the commit message to the change.
-- Sign your work with a `Co-Authored-By` trailer.
+- Sign your work with a `Co-Authored-By` trailer at the end of the
+  message, after a blank line. A trailer on the line after the subject
+  becomes part of the subject.
 
 ## Change descriptions
 
