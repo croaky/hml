@@ -139,6 +139,9 @@ func hoistStaticAttrs(n *node, path string) error {
 			static = false
 			continue
 		}
+		if !validAttrName(a.key) {
+			return fmt.Errorf("%s: key %q is not an attribute name: use ASCII letters, digits, -, _, :, or .", path, a.key)
+		}
 		switch a.val.typ {
 		case astString:
 			if _, err := policyAttr(attrVal{key: a.key, val: toAttrVal(a.val.lit), authored: true}); err != nil {
@@ -448,6 +451,9 @@ func evalAttrs(attrs []attr, ctx context) ([]attrVal, error) {
 				return nil, fmt.Errorf("splat requires a map, got %s", typeName(val))
 			}
 			for k, v := range m {
+				if !validAttrName(k) {
+					return nil, fmt.Errorf("splat key %q is not an attribute name: use ASCII letters, digits, -, _, :, or .", k)
+				}
 				result = append(result, attrVal{
 					key:      k,
 					val:      toAttrVal(v),

@@ -732,6 +732,67 @@ func TestLiteralUnsafeURLIsAnError(t *testing.T) {
 	is.True(strings.Contains(got, `href="https://example.com/favicon.ico"`))
 }
 
+// A splat key becomes an attribute name. A key that holds a space, a
+// slash, or > would add an attribute the policy never saw, or end the
+// tag, so a render refuses it on the valued and the boolean path.
+func TestSplatKeyMustBeAnAttributeName(t *testing.T) {
+	is := is.New(t)
+	tmpl := mustParse(t, "%a{ **attrs }\n  x\n")
+	for _, attrs := range []map[string]any{
+		{"x onclick": "steal()"},
+		{"x/onclick": "steal()"},
+		{"x><script>steal()</script": "y"},
+		{"x><script>steal()</script": true},
+		{"x=\"y\" onclick": "steal()"},
+		{"": "y"},
+	} {
+		_, err := tmpl.Render(map[string]any{"attrs": attrs}, nil)
+		is.HasErr(err)
+		is.True(strings.Contains(err.Error(), "attribute name"))
+	}
+
+	got, err := tmpl.Render(map[string]any{"attrs": map[string]any{
+		"data-id": "7", "aria-label": "Go", "xlink:href": "/x", "hidden": true,
+	}}, nil)
+	is.NoErr(err)
+	is.Eq(got, `<a aria-label="Go" data-id="7" hidden xlink:href="/x">x</a>`+"\n")
+}
+
+// A quoted key on a tag is source, so Parse checks it once.
+func TestQuotedAttributeKeyMustBeAnAttributeName(t *testing.T) {
+	is := is.New(t)
+	_, err := Parse(`%a{ "x onclick": "go()" }`+"\n  x\n", "test.hml", nil)
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "attribute name"))
+
+	got := mustRender(t, `%a{ "aria-label": "Go", "ajax-post": url }`+"\n  x\n", map[string]any{"url": "/p"})
+	is.Eq(got, `<a ajax-post="/p" aria-label="Go">x</a>`+"\n")
+}
+
+// object data loads a document or plugin content, so it takes the URL
+// rule that href takes.
+func TestObjectDataIsAURLAttribute(t *testing.T) {
+	is := is.New(t)
+	got := mustRender(t, "%object{ data: u }\n", map[string]any{"u": "javascript:alert(1)"})
+	is.True(strings.Contains(got, `data="about:invalid#ZgotmplZ"`))
+
+	got = mustRender(t, "%object{ data: u }\n", map[string]any{"u": "https://example.com/a.svg"})
+	is.True(strings.Contains(got, `data="https://example.com/a.svg"`))
+}
+
+// srcdoc is a whole document in the page origin. Escaping does not
+// help, because the browser decodes the value and parses it as HTML.
+func TestSrcdocTakesAnAuthoredValueOnly(t *testing.T) {
+	is := is.New(t)
+	tmpl := mustParse(t, "%iframe{ srcdoc: doc }\n")
+	_, err := tmpl.Render(map[string]any{"doc": "<script>steal()</script>"}, nil)
+	is.HasErr(err)
+	is.True(strings.Contains(err.Error(), "srcdoc"))
+
+	got := mustRender(t, `%iframe{ srcdoc: "<p>hi</p>" }`+"\n", nil)
+	is.True(strings.Contains(got, `srcdoc="&lt;p&gt;hi&lt;/p&gt;"`))
+}
+
 func TestURLAttributeAllowsRelativeAndAllowlistedSchemes(t *testing.T) {
 	is := is.New(t)
 	for _, url := range []string{

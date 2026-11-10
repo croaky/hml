@@ -315,7 +315,31 @@ func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {
 var urlAttrs = map[string]bool{
 	"href": true, "src": true, "action": true, "formaction": true,
 	"poster": true, "cite": true, "background": true, "ping": true,
-	"xlink:href": true,
+	"xlink:href": true, "data": true, "codebase": true, "classid": true,
+	"archive": true, "longdesc": true, "usemap": true, "manifest": true,
+	"icon": true, "profile": true,
+}
+
+// validAttrName reports whether s is safe to write as an attribute
+// name: not empty, and only ASCII letters, digits, -, _, :, and . A
+// name from a splat map is data, and a space, a slash, a quote, =, or
+// > in it would add an attribute the policy never saw, or end the tag.
+// With this set, the name policyAttr reads is the name the browser
+// reads.
+func validAttrName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		case c == '-', c == '_', c == ':', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // urlSchemes is the allowlist for absolute URLs. Everything else —
@@ -344,7 +368,9 @@ const unsafeURL = "about:invalid#ZgotmplZ"
 // the template author wrote — that is application source — or a value
 // the handler marked SafeJS or SafeCSS. A plain dynamic value in either
 // is an error rather than an escape, because there is no escaping that
-// makes untrusted data safe as code.
+// makes untrusted data safe as code. srcdoc is a whole document in the
+// page origin, so it takes authored markup only. hml has no trust type
+// for HTML in an attribute.
 //
 // Where the author wrote it does not enter into it. A string literal is
 // authored wherever it is typed, and it stays so through a hash literal,
@@ -367,6 +393,10 @@ func policyAttr(a attrVal) (string, error) {
 	case name == "style":
 		if !a.authored && a.trust != trustCSS {
 			return "", fmt.Errorf("attribute %s: dynamic value in a CSS context requires hml.SafeCSS", a.key)
+		}
+	case name == "srcdoc":
+		if !a.authored {
+			return "", fmt.Errorf("attribute %s: a document from data needs its own response; point src at it", a.key)
 		}
 	}
 	return a.val, nil

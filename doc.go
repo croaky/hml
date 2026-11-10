@@ -33,14 +33,23 @@
 //     renderer itself: rendered partials, layout body, csrf tags) and
 //     the transform builtins, which sanitize inside the engine.
 //
+//   - An attribute name holds only ASCII letters, digits, -, _, :, and
+//     . — a quoted key on a tag is a Parse error otherwise, and a **
+//     splat key a render error. A splat key is data, and a space, a
+//     slash, a quote, =, or > in it would add an attribute the policy
+//     never saw, or end the tag. With this rule, the name the policy
+//     reads is the name the browser reads.
+//
 //   - Attribute values are constrained by the context the attribute
 //     puts them in. A URL attribute (href, src, action, formaction,
-//     poster, cite, background, ping, xlink:href) takes a relative URL
-//     or one of http, https, mailto, tel. A value from data with any
-//     other scheme renders as the sentinel about:invalid#ZgotmplZ, so
-//     javascript:alert(1) never reaches the browser. The about:invalid
-//     scheme makes the browser fetch nothing. A bare #ZgotmplZ, as in
-//     html/template, resolves to the page itself, so an img or an icon
+//     poster, cite, background, ping, xlink:href, data, codebase,
+//     classid, archive, longdesc, usemap, manifest, icon, profile)
+//     takes a relative URL or one of http, https, mailto, tel. A value
+//     from data with any other scheme renders as the sentinel
+//     about:invalid#ZgotmplZ, so javascript:alert(1) never reaches the
+//     browser. The about:invalid scheme makes the browser fetch nothing.
+//     A bare #ZgotmplZ, as in html/template, resolves to the page
+//     itself, so an img or an icon
 //     link that held it loaded the page a second time. A string literal
 //     with a refused scheme is an error: it can only ever render the
 //     sentinel, so it is a mistake. Parse refuses one typed on a tag,
@@ -51,6 +60,12 @@
 //     application source, or a value the handler marked SafeJS or
 //     SafeCSS. A plain dynamic value there is a render error, because
 //     no escaping makes untrusted data safe as code.
+//
+//     A srcdoc attribute is a whole document in the page origin. The
+//     browser decodes the value and parses it as HTML, so escaping does
+//     not help. It takes a value the author wrote and nothing else.
+//     Serve a document built from data as its own response, and point
+//     src at it.
 //
 //     Code the author wrote means a string literal, wherever it was
 //     typed. It stays authored through a hash literal, a partial
