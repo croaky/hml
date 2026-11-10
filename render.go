@@ -535,17 +535,44 @@ func stripFilterIndent(line string, baseIndent int) string {
 	return strings.TrimLeft(line, " \t")
 }
 
-// renderCallRE splits a `render` call into name + args. It runs once per
-// node at Parse time (compileRender), never during Render.
+// renderCallRE / renderVarRE split a `render` call into name + args. They run
+// once per node at Parse time (compileRender), never during Render.
 var renderCallRE = regexp.MustCompile(`\Arender\s+"([^"]+)"(?:,\s*(.*))?\z`)
+var renderVarRE = regexp.MustCompile(`\Arender\s+(\w[\w.]*)(?:,\s*(.*))?\z`)
+
+// maxPartialDepth is the most partials one render can nest. A partial
+// that renders itself, by a literal name or by a name from data,
+// otherwise recurses until the Go runtime stops the process with a
+// stack overflow, which no recover catches. Real pages nest a few
+// levels: a layout, a list, a row, an icon.
+const maxPartialDepth = 64
 
 // renderPartialCall resolves a precompiled render node (see compileRender):
-// the literal name from renderName, and args from the compiled renderArgs.
-// The args become a child context layered on the caller's, so the partial
-// inherits the caller's locals without copying them.
+// the name comes from renderNameSegs (literal, possibly interpolated) or
+// renderNameExpr (variable), and args from the compiled renderArgs. The args
+// become a child context layered on the caller's, so the partial inherits the
+// caller's locals without copying them.
 func renderPartialCall(n node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
 	if partialFn == nil {
 		return fmt.Errorf("%s: no partialFn provided for: %s", path, n.text)
+	}
+
+	var name string
+	if n.renderNameSegs != nil {
+		s, err := evalInterp(n.renderNameSegs, ctx, false)
+		if err != nil {
+			return err
+		}
+		name = s
+	} else {
+		val, err := evaluate(n.renderNameExpr, ctx)
+		if err != nil {
+			return err
+		}
+		name = stringify(val)
+	}
+	if ctx.depth >= maxPartialDepth {
+		return fmt.Errorf("%s: partial %q: partials nest deeper than %d", path, name, maxPartialDepth)
 	}
 
 	var overlay map[string]any
@@ -557,7 +584,9 @@ func renderPartialCall(n node, buf *strings.Builder, ctx context, partialFn Part
 		}
 	}
 
-	return partialFn(n.renderName, ctx.Child(overlay), buf)
+	child := ctx.Child(overlay)
+	child.depth++
+	return partialFn(name, child, buf)
 }
 
 // stringify converts a value to a string: nil becomes "" (not "<nil>").

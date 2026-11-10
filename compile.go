@@ -98,7 +98,7 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 			}
 		case kindRender:
 			if err := compileRender(n); err != nil {
-				return fmt.Errorf("%s:%d: render %q: %w", path, n.line, n.text, err)
+				return fmt.Errorf("%s: render %q: %w", path, n.text, err)
 			}
 		case kindFilter:
 			segs := make([][]interpSeg, len(n.filterLines))
@@ -300,23 +300,27 @@ func compileAttrs(src string) ([]attr, error) {
 
 // compileRender parses a `render "name", key: val` call once at Parse time,
 // so Render skips the regexp match and arg tokenization it used to do per
-// call (renderPartialCall). Populates n.renderName and n.renderArgs.
-//
-// The name is a string literal with no #{}. A name from data lets data
-// pick what renders, and a partial that picks itself recurses until the
-// Go runtime stops the process, past any recover. A literal name also
-// makes Renders the whole partial graph, so an app finds a cycle at
-// startup.
+// call (renderPartialCall). Populates n.renderNameSegs or n.renderNameExpr
+// plus n.renderArgs.
 func compileRender(n *node) error {
-	m := renderCallRE.FindStringSubmatch(n.text)
-	if m == nil {
-		return fmt.Errorf("partial name must be a string literal")
+	var argsStr string
+	if m := renderCallRE.FindStringSubmatch(n.text); m != nil {
+		segs, err := compileInterp(m[1])
+		if err != nil {
+			return err
+		}
+		n.renderNameSegs = segs
+		argsStr = m[2]
+	} else if m := renderVarRE.FindStringSubmatch(n.text); m != nil {
+		ast, err := compileExpr(m[1])
+		if err != nil {
+			return err
+		}
+		n.renderNameExpr = ast
+		argsStr = m[2]
+	} else {
+		return fmt.Errorf("unsupported render call")
 	}
-	if strings.Contains(m[1], "#{") {
-		return fmt.Errorf("partial name must be a literal, without #{}")
-	}
-	n.renderName = m[1]
-	argsStr := m[2]
 	if strings.TrimSpace(argsStr) != "" {
 		args, err := compileAttrs(argsStr)
 		if err != nil {

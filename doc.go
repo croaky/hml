@@ -83,11 +83,18 @@
 //   - Templates cannot define variables, import modules, or execute
 //     side effects. They only read pre-computed data from the handler.
 //
-//   - A partial name is a string literal, without #{}. A name from data
-//     would let data pick what renders, and a partial that picks itself
-//     recurses until the Go runtime stops the process, past any recover.
-//     A literal name also makes Renders the whole partial graph, so an
-//     app can find a cycle at startup (see README.md).
+//   - Partials nest at most 64 deep in one render. Past that, the
+//     render call is an error that names the view and the partial. A
+//     partial that renders itself, by a literal name or by a name from
+//     data, would otherwise recurse until the Go runtime stops the
+//     process, past any recover. The depth rides on the Context that
+//     the renderer hands the resolver, so a resolver passes that
+//     Context on and does not start a new one.
+//
+//   - A computed partial name (= render name, or #{} in a quoted name)
+//     is data. The resolver looks it up in a fixed set of templates and
+//     returns an error for any other name. It never builds a file path
+//     from it.
 //
 // What the renderer does NOT guarantee:
 //
@@ -255,13 +262,12 @@
 //	                                in an attribute value
 //	- if expr / - else if / - else  conditionals
 //	- for item in items             loops (optional index: for i, item)
-//	= render "name", key: val       partials (name is a literal)
+//	= render "name", key: val       partials
 //	:javascript / :css              filter blocks
 //	-#                              comments (omitted from output)
 //	static text with #{field}       text interpolation (escaped)
 //
 // Banned: != raw output, method calls on data (including predicates like
 // .nil?), hash access, ternaries, case/when, variable assignment, string
-// interpolation with logic, content_for, yield, raw(), sanitize(), a
-// partial name from a local or with #{}.
+// interpolation with logic, content_for, yield, raw(), sanitize().
 package hml

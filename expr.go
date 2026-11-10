@@ -753,9 +753,13 @@ func (p *parser) parseFieldAccess() (*astNode, error) {
 // because partial chains are shallow while parent locals maps are wide.
 // Field access within a value resolves dot-separated names against nested
 // maps and structs.
+//
+// depth counts the partials between the receiver and the root. A loop
+// overlay keeps its parent's depth; renderPartialCall adds one.
 type Context struct {
 	vars   map[string]any
 	parent *Context
+	depth  int
 }
 
 // context aliases *Context so existing `ctx context` signatures stay put.
@@ -775,7 +779,7 @@ func NewContext(vars map[string]any) *Context {
 func (c *Context) Child(vars map[string]any) *Context {
 	// A nil map reads as empty, so an overlay with no bindings costs
 	// nothing to look through.
-	return &Context{vars: vars, parent: c}
+	return &Context{vars: vars, parent: c, depth: c.depth}
 }
 
 // lookup resolves a top-level name by walking the chain from the receiver to

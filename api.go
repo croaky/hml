@@ -104,9 +104,10 @@ func Parse(source, path string, transforms map[string]Transform) (*Template, err
 // cannot see: use Renders to walk that graph.
 func (t *Template) Names() []string { return t.names }
 
-// Renders returns the partial names this template renders, sorted and
-// deduplicated, so a caller can walk its own graph. A partial name is
-// always a literal, so the list is complete.
+// Renders returns the partial names this template renders with a
+// literal `= render "name"`, sorted and deduplicated, so a caller can
+// walk its own graph. A computed name is not resolvable here and is
+// omitted.
 func (t *Template) Renders() []string { return t.renders }
 
 // HasCondition reports whether the template holds an `- if` or an
@@ -191,14 +192,34 @@ func (w *nameWalk) walkNodes(nodes []node) {
 	}
 }
 
-// walkRender records the partial name and reads the argument values.
-// The argument keys name locals the partial reads, not ones the caller
-// must supply, so they are not names.
+// walkRender records a literal partial name and reads the argument
+// values. The argument keys name locals the partial reads, not ones the
+// caller must supply, so they are not names.
 func (w *nameWalk) walkRender(n *node) {
-	w.renders[n.renderName] = true
+	if name, ok := literalSegs(n.renderNameSegs); ok {
+		w.renders[name] = true
+	}
+	w.walkInterp(n.renderNameSegs)
+	w.walkExpr(n.renderNameExpr)
 	for _, a := range n.renderArgs {
 		w.walkExpr(a.val)
 	}
+}
+
+// literalSegs returns the name of a partial whose every segment is a
+// literal. An interpolated name is not resolvable at parse time.
+func literalSegs(segs []interpSeg) (string, bool) {
+	if len(segs) == 0 {
+		return "", false
+	}
+	var b strings.Builder
+	for _, s := range segs {
+		if s.expr != nil {
+			return "", false
+		}
+		b.WriteString(s.lit)
+	}
+	return b.String(), true
 }
 
 func (w *nameWalk) bind(name string) {
@@ -343,7 +364,8 @@ type node struct {
 	filterSegs [][]interpSeg // filter lines, indent stripped, per line
 
 	// Compiled render call (kindRender), replacing per-render regexp +
-	// tokenize.
-	renderName string // literal partial name
-	renderArgs []attr // compiled locals (key: val and **splat)
+	// tokenize. Exactly one of renderNameSegs / renderNameExpr is set.
+	renderNameSegs []interpSeg // literal partial name (may interpolate #{})
+	renderNameExpr *astNode    // variable partial name
+	renderArgs     []attr      // compiled locals (key: val and **splat)
 }

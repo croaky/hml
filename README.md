@@ -46,8 +46,7 @@ tmpl.Renders() // partials it renders by literal name
 `Names` answers for one file. A partial inherits its caller's locals, so
 follow `Renders` to check a whole page.
 
-A partial name is always a literal, so `Renders` is the whole graph.
-Check at startup that each template resolves its partials:
+Check at startup that each template resolves all literal partials:
 
 ```go
 for path, tmpl := range templates {
@@ -56,24 +55,6 @@ for path, tmpl := range templates {
 			log.Fatalf("%s: missing partial %q", path, name)
 		}
 	}
-}
-```
-
-A partial that reaches itself recurses until the Go runtime stops the
-process. Check at startup that no partial does:
-
-```go
-var visit func(name string, path []string)
-visit = func(name string, path []string) {
-	if slices.Contains(path, name) {
-		log.Fatalf("partial cycle: %s", strings.Join(append(path, name), " -> "))
-	}
-	for _, next := range templates[name].Renders() {
-		visit(next, append(path, name))
-	}
-}
-for name := range templates {
-	visit(name, nil)
 }
 ```
 
