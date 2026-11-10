@@ -5,7 +5,7 @@ import (
 	"html"
 	"reflect"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -45,7 +45,7 @@ func renderNodes(nodes []node, buf *strings.Builder, ctx context, partialFn Part
 			if s, ok := val.(SafeString); ok {
 				buf.WriteString(string(s))
 			} else {
-				buf.WriteString(escapeHTML(stringify(val)))
+				writeEscapedHTML(buf, stringify(val))
 			}
 			buf.WriteByte('\n')
 		case kindTransform:
@@ -95,7 +95,7 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialWrite
 	// rendering it into a second buffer, is what lets the tag choose
 	// its layout without a copy.
 	if n.layout == layoutInline {
-		text, err := renderLeaf(n.children[0], ctx, path)
+		text, escape, err := renderLeaf(n.children[0], ctx, path)
 		if err != nil {
 			return err
 		}
@@ -110,13 +110,22 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialWrite
 		// opening tag buys nothing -- the collapsed space they
 		// would have is between blocks, where nothing sees it --
 		// and costs the shape that makes the output readable.
-		if strings.Contains(text, "\n") {
+		// Escaping adds no newline and removes none, so the raw
+		// text answers the question for the escaped text.
+		multiline := strings.Contains(text, "\n")
+		if multiline {
 			buf.WriteString(">\n")
-			buf.WriteString(text)
-			buf.WriteString("\n</")
 		} else {
 			buf.WriteByte('>')
+		}
+		if escape {
+			writeEscapedHTML(buf, text)
+		} else {
 			buf.WriteString(text)
+		}
+		if multiline {
+			buf.WriteString("\n</")
+		} else {
 			buf.WriteString("</")
 		}
 		buf.WriteString(tag)
@@ -159,32 +168,35 @@ func renderTag(n node, buf *strings.Builder, ctx context, partialFn PartialWrite
 }
 
 // renderLeaf evaluates a text, output, or transform node to the string
-// renderNodes would write for it, without the trailing newline.
-func renderLeaf(n node, ctx context, path string) (string, error) {
+// renderNodes would write for it, without the trailing newline. When
+// escape is true, the caller must escape the string as it writes it.
+// The caller escapes into its buffer, so an escaped value costs no
+// second string.
+func renderLeaf(n node, ctx context, path string) (text string, escape bool, err error) {
 	switch n.kind {
 	case kindText:
 		s, err := evalInterp(n.textSegs, ctx, true)
 		if err != nil {
-			return "", fmt.Errorf("%s: text interpolation: %w", path, err)
+			return "", false, fmt.Errorf("%s: text interpolation: %w", path, err)
 		}
-		return s, nil
+		return s, false, nil
 	case kindOutput:
 		val, err := evaluate(n.exprAST, ctx)
 		if err != nil {
-			return "", fmt.Errorf("%s: output eval %q: %w", path, n.text, err)
+			return "", false, fmt.Errorf("%s: output eval %q: %w", path, n.text, err)
 		}
 		if s, ok := val.(SafeString); ok {
-			return string(s), nil
+			return string(s), false, nil
 		}
-		return escapeHTML(stringify(val)), nil
+		return stringify(val), true, nil
 	case kindTransform:
 		val, err := evaluate(n.exprAST, ctx)
 		if err != nil {
-			return "", fmt.Errorf("%s: transform eval %q: %w", path, n.expr, err)
+			return "", false, fmt.Errorf("%s: transform eval %q: %w", path, n.expr, err)
 		}
-		return n.transform(stringify(val)), nil
+		return n.transform(stringify(val)), false, nil
 	}
-	return "", fmt.Errorf("%s: not a leaf: %d", path, n.kind)
+	return "", false, fmt.Errorf("%s: not a leaf: %d", path, n.kind)
 }
 
 // writeAttrs writes a tag's attributes after its name, each preceded
@@ -223,7 +235,7 @@ func writeAttrsDynamic(n node, buf *strings.Builder, ctx context, path string) e
 			buf.WriteByte(' ')
 			buf.WriteString(a.key)
 			buf.WriteString("=\"")
-			buf.WriteString(escapeHTML(val))
+			writeEscapedHTML(buf, val)
 			buf.WriteByte('"')
 		}
 	}
@@ -270,14 +282,18 @@ func loneTextChild(children []node) bool {
 }
 
 func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {
-	result := make([]attrVal, 0, len(n.attrs)+2)
 	class := n.classStr
 
+	// evalAttrs appends into the one slice that buildAttrs returns,
+	// and the class pairs leave it in place. The two extra slots
+	// hold the class and the id.
+	var result []attrVal
 	if n.attrs != nil {
-		pairs, err := evalAttrs(n.attrs, ctx)
+		pairs, err := evalAttrs(make([]attrVal, 0, len(n.attrs)+2), n.attrs, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%s: attribute eval: %w", path, err)
 		}
+		result = pairs[:0]
 		for _, p := range pairs {
 			if p.key == "class" {
 				// Omit nil/false/empty class values so conditional
@@ -294,6 +310,8 @@ func buildAttrs(n node, ctx context, path string) ([]attrVal, error) {
 				result = append(result, p)
 			}
 		}
+	} else {
+		result = make([]attrVal, 0, 2)
 	}
 
 	if class != "" {
@@ -638,8 +656,11 @@ func sortAttrs(result []attrVal) {
 			result[0], result[1] = result[1], result[0]
 		}
 	default:
-		sort.Slice(result, func(i, j int) bool {
-			return result[i].key < result[j].key
+		// slices.SortFunc and sort.Slice run the same pdqsort, so
+		// the order is the same. slices.SortFunc needs no reflect
+		// swapper, which sort.Slice allocates on each call.
+		slices.SortFunc(result, func(a, b attrVal) int {
+			return strings.Compare(a.key, b.key)
 		})
 	}
 }
@@ -691,4 +712,55 @@ func escapeHTML(s string) string {
 		return s
 	}
 	return html.EscapeString(s)
+}
+
+// htmlEscapes maps each byte that escapeHTML replaces to its
+// replacement, the one html.EscapeString writes. Every other byte maps
+// to "". A table lookup costs less than a switch for each byte.
+var htmlEscapes = [256]string{
+	'&':  "&amp;",
+	'\'': "&#39;",
+	'<':  "&lt;",
+	'>':  "&gt;",
+	'"':  "&#34;",
+}
+
+// escapeRunLimit is the most special characters writeEscapedHTML
+// writes run by run. Above it, html.EscapeString is faster: it sizes
+// one string and fills it, while each run costs two buffer writes.
+const escapeRunLimit = 16
+
+// writeEscapedHTML writes s to buf with the escapes of escapeHTML.
+// Most values hold no special character or a few. For those it writes
+// each run between special characters as it is, so an escaped value
+// costs no second string.
+func writeEscapedHTML(buf *strings.Builder, s string) {
+	// The count stops past escapeRunLimit, so dense text pays for
+	// a short scan only.
+	n := 0
+	for i := 0; i < len(s) && n <= escapeRunLimit; i++ {
+		if htmlEscapes[s[i]] != "" {
+			n++
+		}
+	}
+	if n == 0 {
+		buf.WriteString(s)
+		return
+	}
+	if n > escapeRunLimit {
+		buf.WriteString(html.EscapeString(s))
+		return
+	}
+	buf.Grow(len(s) + 4*n)
+	last := 0
+	for i := 0; i < len(s); i++ {
+		esc := htmlEscapes[s[i]]
+		if esc == "" {
+			continue
+		}
+		buf.WriteString(s[last:i])
+		buf.WriteString(esc)
+		last = i + 1
+	}
+	buf.WriteString(s[last:])
 }

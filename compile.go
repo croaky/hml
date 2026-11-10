@@ -3,6 +3,7 @@ package hml
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 )
 
@@ -405,11 +406,11 @@ func evalInterp(segs []interpSeg, ctx context, escape bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		str := stringify(val)
 		if escape {
-			str = escapeHTML(str)
+			writeEscapedHTML(&buf, stringify(val))
+		} else {
+			buf.WriteString(stringify(val))
 		}
-		buf.WriteString(str)
 	}
 	return buf.String(), nil
 }
@@ -442,8 +443,7 @@ const (
 // evalAttrs evaluates compiled attribute pairs into stringified
 // key/value pairs. It matches the eval half of the old parseHash,
 // including splat expansion and toAttrVal sentinel encoding.
-func evalAttrs(attrs []attr, ctx context) ([]attrVal, error) {
-	var result []attrVal
+func evalAttrs(result []attrVal, attrs []attr, ctx context) ([]attrVal, error) {
 	for _, a := range attrs {
 		val, err := evaluate(a.val, ctx)
 		if err != nil {
@@ -454,6 +454,7 @@ func evalAttrs(attrs []attr, ctx context) ([]attrVal, error) {
 			if !ok {
 				return nil, fmt.Errorf("splat requires a map, got %s", typeName(val))
 			}
+			result = slices.Grow(result, len(m))
 			for k, v := range m {
 				if !validAttrName(k) {
 					return nil, fmt.Errorf("splat key %q is not an attribute name: use ASCII letters, digits, -, _, :, or .", k)
