@@ -118,10 +118,11 @@ module.exports = grammar({
     // Output
     output: ($) => seq("=", choice($.partial, $._expr, $.bare_call)),
 
+    // A partial name is a string literal, as in compileRender.
     partial: ($) =>
       seq(
         "render",
-        field("name", $._expr),
+        field("name", $.string),
         optional(seq(",", commaSep1($._attr_entry))),
       ),
 

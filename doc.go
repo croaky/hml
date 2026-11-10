@@ -68,6 +68,12 @@
 //   - Templates cannot define variables, import modules, or execute
 //     side effects. They only read pre-computed data from the handler.
 //
+//   - A partial name is a string literal, without #{}. A name from data
+//     would let data pick what renders, and a partial that picks itself
+//     recurses until the Go runtime stops the process, past any recover.
+//     A literal name also makes Renders the whole partial graph, so an
+//     app can find a cycle at startup (see README.md).
+//
 // What the renderer does NOT guarantee:
 //
 //   - No context awareness outside attribute values. = output and
@@ -234,12 +240,13 @@
 //	                                in an attribute value
 //	- if expr / - else if / - else  conditionals
 //	- for item in items             loops (optional index: for i, item)
-//	= render "name", key: val       partials
+//	= render "name", key: val       partials (name is a literal)
 //	:javascript / :css              filter blocks
 //	-#                              comments (omitted from output)
 //	static text with #{field}       text interpolation (escaped)
 //
 // Banned: != raw output, method calls on data (including predicates like
 // .nil?), hash access, ternaries, case/when, variable assignment, string
-// interpolation with logic, content_for, yield, raw(), sanitize().
+// interpolation with logic, content_for, yield, raw(), sanitize(), a
+// partial name from a local or with #{}.
 package hml

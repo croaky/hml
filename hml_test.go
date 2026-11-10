@@ -1054,14 +1054,34 @@ func TestRendersListsLiteralPartialNames(t *testing.T) {
 	is.True(slices.Equal(tmpl.Names(), []string{"v"}))
 }
 
-func TestRendersOmitsComputedNames(t *testing.T) {
+// A partial name is a literal. A name from data would let data pick
+// what renders, and a partial that picks itself recurses until the Go
+// runtime stops the process.
+func TestParseRefusesComputedPartialName(t *testing.T) {
 	is := is.New(t)
-	src := "= render partial\n" +
-		"= render \"cards/#{kind}\"\n" +
-		"= render \"plain\"\n"
-	tmpl := mustParse(t, src)
-	is.True(slices.Equal(tmpl.Renders(), []string{"plain"}))
-	is.True(slices.Equal(tmpl.Names(), []string{"kind", "partial"}))
+	for _, src := range []string{
+		"= render partial\n",
+		"= render data.partial, k: v\n",
+		"= render \"cards/#{kind}\"\n",
+	} {
+		_, err := Parse(src, "test.hml", nil)
+		is.HasErr(err)
+		is.True(strings.Contains(err.Error(), "test.hml:1"))
+	}
+}
+
+func TestLiteralPartialNameRenders(t *testing.T) {
+	is := is.New(t)
+	tmpl := mustParse(t, "= render \"card\"\n= render \"card\", user: person\n")
+	is.True(slices.Equal(tmpl.Renders(), []string{"card"}))
+	var names []string
+	got, err := tmpl.Render(map[string]any{"person": "ann"}, func(name string, ctx *Context) (string, error) {
+		names = append(names, name)
+		return "<p>card</p>", nil
+	})
+	is.NoErr(err)
+	is.True(slices.Equal(names, []string{"card", "card"}))
+	is.Eq(got, "<p>card</p><p>card</p>")
 }
 
 func TestNamesDoesNotFollowPartials(t *testing.T) {

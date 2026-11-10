@@ -505,34 +505,17 @@ func stripFilterIndent(line string, baseIndent int) string {
 	return strings.TrimLeft(line, " \t")
 }
 
-// renderCallRE / renderVarRE split a `render` call into name + args. They run
-// once per node at Parse time (compileRender), never during Render.
+// renderCallRE splits a `render` call into name + args. It runs once per
+// node at Parse time (compileRender), never during Render.
 var renderCallRE = regexp.MustCompile(`\Arender\s+"([^"]+)"(?:,\s*(.*))?\z`)
-var renderVarRE = regexp.MustCompile(`\Arender\s+(\w[\w.]*)(?:,\s*(.*))?\z`)
 
 // renderPartialCall resolves a precompiled render node (see compileRender):
-// the name comes from renderNameSegs (literal, possibly interpolated) or
-// renderNameExpr (variable), and args from the compiled renderArgs. The args
-// become a child context layered on the caller's, so the partial inherits the
-// caller's locals without copying them.
+// the literal name from renderName, and args from the compiled renderArgs.
+// The args become a child context layered on the caller's, so the partial
+// inherits the caller's locals without copying them.
 func renderPartialCall(n node, buf *strings.Builder, ctx context, partialFn PartialWriter, path string) error {
 	if partialFn == nil {
 		return fmt.Errorf("%s: no partialFn provided for: %s", path, n.text)
-	}
-
-	var name string
-	if n.renderNameSegs != nil {
-		s, err := evalInterp(n.renderNameSegs, ctx, false)
-		if err != nil {
-			return err
-		}
-		name = s
-	} else {
-		val, err := evaluate(n.renderNameExpr, ctx)
-		if err != nil {
-			return err
-		}
-		name = stringify(val)
 	}
 
 	var overlay map[string]any
@@ -544,7 +527,7 @@ func renderPartialCall(n node, buf *strings.Builder, ctx context, partialFn Part
 		}
 	}
 
-	return partialFn(name, ctx.Child(overlay), buf)
+	return partialFn(n.renderName, ctx.Child(overlay), buf)
 }
 
 // stringify converts a value to a string: nil becomes "" (not "<nil>").
