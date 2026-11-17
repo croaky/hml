@@ -54,13 +54,15 @@ type Template struct {
 type SafeString string
 
 // SafeJS marks a string the handler asserts is JavaScript source safe to
-// place in an on* event-handler attribute. Without it, a dynamic on*
-// value is a render error: the renderer cannot tell data from code.
+// place in an on* event-handler attribute, or as code in a :javascript
+// block. Without it, a dynamic on* value is a render error, and a
+// :javascript value outside a string is a quoted literal: the renderer
+// cannot tell data from code.
 type SafeJS string
 
 // SafeCSS marks a string the handler asserts is CSS declarations safe to
-// place in a style attribute. Without it, a dynamic style value is a
-// render error.
+// place in a style attribute or a :css block. Without it, a dynamic
+// style value or a :css value that is not a number is a render error.
 type SafeCSS string
 
 // Parse parses hml source into a Template. transforms is the

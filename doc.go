@@ -96,12 +96,34 @@
 //     returns an error for any other name. It never builds a file path
 //     from it.
 //
+//   - A #{} in a :javascript block is escaped for where it sits, as
+//     html/template does in a script. Parse reads the script around
+//     each #{} and records its place, so a render does no lexing.
+//     Inside a string or a template literal, the value is string
+//     content: each quote, the backslash, $, <, >, &, a control
+//     character, and U+2028 and U+2029 become \u escapes. In code, a
+//     string becomes a quoted literal with the same escapes; a number,
+//     a bool, and nil become 42, true, and null; a SafeJS value is
+//     written as it is; and any other value becomes its JSON. So
+//     "#{name}" and f(#{name}) are both safe, and no value can end
+//     its string or the script element. A #{} in a comment or a
+//     regular expression is a Parse error, because no escape makes a
+//     value safe there.
+//
+//   - A #{} in a :css block takes a number or a SafeCSS value, and
+//     anything else is a render error. CSS has no string escape that
+//     holds in every place, so the handler builds the CSS.
+//
 // What the renderer does NOT guarantee:
 //
-//   - No context awareness outside attribute values. = output and
-//     #{} interpolation in body text get uniform html.EscapeString.
-//     :javascript and :css filter blocks interpolate without escaping
-//     and without a trust type; that is a known gap.
+//   - No context awareness in body text. = output and #{}
+//     interpolation in body text get uniform html.EscapeString.
+//   - The :javascript lexer knows strings, template literals, comments,
+//     and regular expressions, and nothing else. A slash after an
+//     operand is a division, and a slash after an operator or a keyword
+//     such as return starts a regular expression. A script that defeats
+//     that choice can move a #{} out of a regular expression. Keep
+//     regular expressions that hold a quote out of a block with a #{}.
 //   - Attribute rules key off the attribute name, not the value. The
 //     renderer will not tell a well-formed http URL from one pointing
 //     somewhere you did not intend, and it does not parse CSS or JS
@@ -244,9 +266,11 @@
 //     it in Go and mark it SafeJS or SafeCSS, or pass the data through
 //     a data- attribute and read it from JavaScript. Interpolating data
 //     into one in the template is the case the policy refuses.
-//   - :javascript filter blocks pass through without escaping. Don't
-//     interpolate user-controlled values into JS. Use data- attributes
-//     on HTML elements instead, and read them from JS.
+//   - In a :javascript block, write a value as the data it is:
+//     "#{name}" for text, f(#{count}) for a number, f(#{opts}) for a
+//     map. Do not escape it in Go first, because the engine escapes it
+//     again. Mark a value SafeJS only when Go built it as code, for
+//     example with encoding/json, which escapes <, >, and &.
 //
 // # Subset grammar
 //
@@ -263,7 +287,7 @@
 //	- if expr / - else if / - else  conditionals
 //	- for item in items             loops (optional index: for i, item)
 //	= render "name", key: val       partials
-//	:javascript / :css              filter blocks
+//	:javascript / :css              filter blocks (#{} escaped by place)
 //	-#                              comments (omitted from output)
 //	static text with #{field}       text interpolation (escaped)
 //

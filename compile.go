@@ -16,11 +16,28 @@ type attr struct {
 }
 
 // interpSeg is one compiled piece of interpolated text: a literal
-// (expr == nil) or an expression to evaluate and stringify.
+// (expr == nil) or an expression to evaluate and stringify. In a filter
+// block, place says how renderFilter writes the value.
 type interpSeg struct {
-	lit  string
-	expr *astNode
+	lit   string
+	expr  *astNode
+	place filterPlace
 }
+
+// filterPlace is where a #{} sits in a filter block. Parse decides it
+// from the source around the #{}, so a render only looks it up.
+type filterPlace uint8
+
+const (
+	// placeNone is text or an attribute, which have their own escape.
+	placeNone filterPlace = iota
+	// placeJSValue is JavaScript code, where a value is an expression.
+	placeJSValue
+	// placeJSString is inside a JavaScript string or template literal.
+	placeJSString
+	// placeCSS is anywhere in a :css block.
+	placeCSS
+)
 
 // compileNodes pre-parses every expression, attribute hash, and text
 // interpolation in the tree into ASTs once, so Render never has to
@@ -103,11 +120,27 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 			}
 		case kindFilter:
 			segs := make([][]interpSeg, len(n.filterLines))
+			var js jsLexer
 			for j, line := range n.filterLines {
 				s, err := compileInterp(stripFilterIndent(line, n.indent))
 				if err != nil {
 					return fmt.Errorf("%s: filter interpolation: %w", path, err)
 				}
+				for k := range s {
+					switch {
+					case n.filterName == "css":
+						s[k].place = placeCSS
+					case s[k].expr == nil:
+						js.read(s[k].lit)
+					default:
+						place, err := js.place()
+						if err != nil {
+							return fmt.Errorf("%s:%d: :javascript interpolation %w", path, n.line+j+1, err)
+						}
+						s[k].place = place
+					}
+				}
+				js.endLine()
 				segs[j] = s
 			}
 			n.filterSegs = segs
@@ -330,6 +363,195 @@ func compileRender(n *node) error {
 		n.renderArgs = args
 	}
 	return nil
+}
+
+// jsLexer reads the literal source of a :javascript block, one segment
+// at a time, so that place can say where each #{} sits. It knows the
+// strings, template literals, comments, and regular expressions of
+// JavaScript, and nothing else, which is all a place needs.
+//
+// A slash in code starts a regular expression or is a division. As in
+// html/template, the token before the slash decides. A wrong choice can
+// read a quote in a regular expression as the start of a string. Such
+// a regular expression is rare, and doc.go names the limit.
+type jsLexer struct {
+	state jsState
+	// braces counts the open { of each ${ in a template literal that
+	// is still open, innermost last. A } at depth 0 ends the ${.
+	braces []int
+	// last is the last code byte that is not space, and word the
+	// identifier that ends at it, for the regex-or-division choice.
+	// sawSpace says a space follows last, so a new identifier starts
+	// a new word.
+	last     byte
+	word     string
+	sawSpace bool
+}
+
+type jsState uint8
+
+const (
+	jsCode jsState = iota
+	jsDouble
+	jsSingle
+	jsTemplate
+	jsLineComment
+	jsBlockComment
+	jsRegex
+	jsRegexClass
+)
+
+// jsRegexAfterWord holds the keywords after which a slash starts a
+// regular expression, as after an operator.
+var jsRegexAfterWord = map[string]bool{
+	"return": true, "typeof": true, "case": true, "do": true,
+	"else": true, "in": true, "instanceof": true, "new": true,
+	"throw": true, "void": true, "delete": true, "yield": true,
+	"await": true,
+}
+
+func (l *jsLexer) read(s string) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch l.state {
+		case jsCode:
+			l.readCode(s, &i)
+		case jsDouble, jsSingle:
+			if c == '\\' {
+				i++
+			} else if (c == '"' && l.state == jsDouble) || (c == '\'' && l.state == jsSingle) {
+				l.state = jsCode
+				l.operand()
+			}
+		case jsTemplate:
+			switch {
+			case c == '\\':
+				i++
+			case c == '`':
+				l.state = jsCode
+				l.operand()
+			case c == '$' && i+1 < len(s) && s[i+1] == '{':
+				i++
+				l.braces = append(l.braces, 0)
+				l.state = jsCode
+				l.last, l.word, l.sawSpace = '{', "", false
+			}
+		case jsLineComment:
+		case jsBlockComment:
+			if c == '*' && i+1 < len(s) && s[i+1] == '/' {
+				i++
+				l.state = jsCode
+			}
+		case jsRegex:
+			switch c {
+			case '\\':
+				i++
+			case '[':
+				l.state = jsRegexClass
+			case '/':
+				l.state = jsCode
+				l.operand()
+			}
+		case jsRegexClass:
+			switch c {
+			case '\\':
+				i++
+			case ']':
+				l.state = jsRegex
+			}
+		}
+	}
+}
+
+// readCode reads the byte at s[*i] in code, and the byte after it when
+// the two make one token.
+func (l *jsLexer) readCode(s string, i *int) {
+	c := s[*i]
+	next := byte(0)
+	if *i+1 < len(s) {
+		next = s[*i+1]
+	}
+	switch {
+	case c == '"':
+		l.state = jsDouble
+	case c == '\'':
+		l.state = jsSingle
+	case c == '`':
+		l.state = jsTemplate
+	case c == '/' && next == '/':
+		l.state = jsLineComment
+	case c == '/' && next == '*':
+		*i++
+		l.state = jsBlockComment
+	case c == '/' && l.regexAllowed():
+		l.state = jsRegex
+	case c == '}' && len(l.braces) > 0 && l.braces[len(l.braces)-1] == 0:
+		l.braces = l.braces[:len(l.braces)-1]
+		l.state = jsTemplate
+	case c == ' ' || c == '\t' || c == '\r' || c == '\n':
+		l.sawSpace = true
+	default:
+		if len(l.braces) > 0 {
+			switch c {
+			case '{':
+				l.braces[len(l.braces)-1]++
+			case '}':
+				l.braces[len(l.braces)-1]--
+			}
+		}
+		if isIdentByte(c) {
+			if !isIdentByte(l.last) || l.sawSpace {
+				l.word = ""
+			}
+			l.word += string(c)
+		} else {
+			l.word = ""
+		}
+		l.last, l.sawSpace = c, false
+	}
+}
+
+// operand records that the code before the next token ends in a value,
+// so a slash there is a division.
+func (l *jsLexer) operand() {
+	l.last, l.word, l.sawSpace = 'a', "", false
+}
+
+func (l *jsLexer) regexAllowed() bool {
+	if l.last == 0 {
+		return true
+	}
+	if isIdentByte(l.last) {
+		return jsRegexAfterWord[l.word]
+	}
+	return strings.IndexByte("(,=:[!&|?{};+-*%<>~^", l.last) >= 0
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// place says where a #{} at the current position sits, and refuses a
+// position where no escape makes a value safe: a comment and a regular
+// expression. The value counts as an operand for the next token.
+func (l *jsLexer) place() (filterPlace, error) {
+	switch l.state {
+	case jsCode:
+		l.operand()
+		return placeJSValue, nil
+	case jsDouble, jsSingle, jsTemplate:
+		return placeJSString, nil
+	case jsLineComment, jsBlockComment:
+		return placeNone, fmt.Errorf("in a comment: move the value out of the comment")
+	}
+	return placeNone, fmt.Errorf("in a regular expression: build the pattern in Go, or pass the value as a string to new RegExp")
+}
+
+// endLine ends a line comment. Each filter line is one source line.
+func (l *jsLexer) endLine() {
+	if l.state == jsLineComment {
+		l.state = jsCode
+	}
 }
 
 // compileInterp splits interpolated text into literal and expression

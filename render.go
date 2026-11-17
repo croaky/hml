@@ -1,6 +1,7 @@
 package hml
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"reflect"
@@ -526,11 +527,19 @@ func renderFilter(n node, buf *strings.Builder, ctx context, path string) error 
 		buf.WriteString("<style>\n")
 	}
 	for _, segs := range n.filterSegs {
-		s, err := evalInterp(segs, ctx, false)
-		if err != nil {
-			return fmt.Errorf("%s: filter interpolation: %w", path, err)
+		for _, s := range segs {
+			if s.expr == nil {
+				buf.WriteString(s.lit)
+				continue
+			}
+			val, err := evaluate(s.expr, ctx)
+			if err != nil {
+				return fmt.Errorf("%s: filter interpolation: %w", path, err)
+			}
+			if err := writeFilterValue(buf, s.place, val); err != nil {
+				return fmt.Errorf("%s: filter interpolation: %w", path, err)
+			}
 		}
-		buf.WriteString(s)
 		buf.WriteByte('\n')
 	}
 	switch n.filterName {
@@ -540,6 +549,76 @@ func renderFilter(n node, buf *strings.Builder, ctx context, path string) error 
 		buf.WriteString("</style>\n")
 	}
 	return nil
+}
+
+// writeFilterValue writes a value into a filter block, escaped for its
+// place, as html/template does in a script. In a string, a value is
+// string content. In code, a string becomes a quoted literal, and any
+// other value becomes its JSON. Each escape writes <, >, and & as \u
+// escapes, so a value cannot end the script element.
+//
+// CSS has no string escape that holds in every place, so a :css value
+// is a number or a SafeCSS that the handler built.
+func writeFilterValue(buf *strings.Builder, place filterPlace, val any) error {
+	switch place {
+	case placeJSString:
+		writeJSStringContent(buf, stringify(val))
+		return nil
+	case placeCSS:
+		switch v := val.(type) {
+		case SafeCSS:
+			buf.WriteString(string(v))
+		case int, int64, float64:
+			buf.WriteString(stringify(v))
+		default:
+			return fmt.Errorf("a :css value must be a number or hml.SafeCSS, got %s", typeName(val))
+		}
+		return nil
+	}
+	switch v := val.(type) {
+	case nil:
+		buf.WriteString("null")
+	case SafeJS:
+		buf.WriteString(string(v))
+	case bool, int, int64, float64:
+		buf.WriteString(stringify(v))
+	case string, authored, SafeString, SafeCSS:
+		buf.WriteByte('"')
+		writeJSStringContent(buf, stringify(v))
+		buf.WriteByte('"')
+	default:
+		// encoding/json writes <, >, &, U+2028, and U+2029 as \u
+		// escapes, and escapes each quote inside a string.
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("a :javascript value: %w", err)
+		}
+		buf.Write(b)
+	}
+	return nil
+}
+
+// writeJSStringContent writes s as the content of a JavaScript string,
+// a template literal, or a quoted literal. It escapes each quote, the
+// backslash, $, the characters of HTML markup, the control characters,
+// and the two line separators, so the content cannot end its string,
+// start a substitution, or end the script element.
+func writeJSStringContent(buf *strings.Builder, s string) {
+	const hex = "0123456789abcdef"
+	for _, r := range s {
+		switch {
+		case r < 0x20 || strings.ContainsRune("\"'`\\$<>&", r):
+			buf.WriteString(`\u00`)
+			buf.WriteByte(hex[r>>4])
+			buf.WriteByte(hex[r&0xf])
+		case r == '\u2028':
+			buf.WriteString(`\u2028`)
+		case r == '\u2029':
+			buf.WriteString(`\u2029`)
+		default:
+			buf.WriteRune(r)
+		}
+	}
 }
 
 func stripFilterIndent(line string, baseIndent int) string {
