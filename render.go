@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 var voidElements = map[string]bool{
@@ -523,12 +522,10 @@ func renderFor(n node, buf *strings.Builder, ctx context, partialFn PartialWrite
 }
 
 func renderFilter(n node, buf *strings.Builder, ctx context, path string) error {
-	switch n.filterName {
-	case "javascript":
-		buf.WriteString("<script>\n")
-	case "css":
-		buf.WriteString("<style>\n")
+	if n.filterName == "javascript" {
+		return renderJavaScript(n, buf, ctx, path)
 	}
+	buf.WriteString("<style>\n")
 	for _, segs := range n.filterSegs {
 		for _, s := range segs {
 			if s.expr == nil {
@@ -539,55 +536,127 @@ func renderFilter(n node, buf *strings.Builder, ctx context, path string) error 
 			if err != nil {
 				return fmt.Errorf("%s: filter interpolation: %w", path, err)
 			}
-			if err := writeFilterValue(buf, s.place, val); err != nil {
-				return fmt.Errorf("%s: filter interpolation: %w", path, err)
+			// CSS has no string escape that holds in every place, so a
+			// :css value is a number or a SafeCSS that the handler built.
+			switch v := val.(type) {
+			case SafeCSS:
+				buf.WriteString(string(v))
+			case int, int64, float64:
+				buf.WriteString(stringify(v))
+			default:
+				return fmt.Errorf("%s: filter interpolation: a :css value must be a number or hml.SafeCSS, got %s", path, typeName(val))
 			}
 		}
 		buf.WriteByte('\n')
 	}
-	switch n.filterName {
-	case "javascript":
-		buf.WriteString("</script>\n")
-	case "css":
-		buf.WriteString("</style>\n")
-	}
+	buf.WriteString("</style>\n")
 	return nil
 }
 
-// writeFilterValue writes a value into a filter block, escaped for its
-// place, as html/template does in a script. In a string, a value is
-// string content. In code, a string becomes a quoted literal, and any
-// other value becomes its JSON. Each escape writes <, >, and & as \u
-// escapes, so a value cannot end the script element.
+// renderJavaScript writes a :javascript block. No value goes into the
+// script source. The block starts with one statement that holds every
+// value, in order, as an element of an array:
 //
-// CSS has no string escape that holds in every place, so a :css value
-// is a number or a SafeCSS that the handler built.
-func writeFilterValue(buf *strings.Builder, place filterPlace, val any) error {
-	switch place {
-	case placeJSString:
-		s := stringify(val)
-		if s != "" && s[0] < utf8.RuneSelf && endsInMarkupPrefix(buf.String()) {
-			writeJSEscape(buf, s[0])
-			s = s[1:]
+//	var __hml_<hash> = ["/users/7",42];
+//
+// Each #{} in the source becomes a read of its element: __hml_<hash>[0]
+// in code, ${__hml_<hash>[0]} in a template literal. Parse rewrote each
+// quoted string that holds a #{} as a template literal. So a lexer
+// error can move only text that hml or the author wrote, and data never
+// runs as code. The array is JSON with <, >, and & as \u escapes, so no
+// value can end the script element either.
+//
+// The name holds a hash of the array. A page that holds two blocks has
+// two globals, and a function in one block that runs later reads its
+// own values, not the other block's. Two blocks with the same values
+// share one name and the same array.
+func renderJavaScript(n node, buf *strings.Builder, ctx context, path string) error {
+	buf.WriteString("<script>\n")
+	var name []byte
+	if n.filterValues > 0 {
+		var vals strings.Builder
+		for _, segs := range n.filterSegs {
+			for _, s := range segs {
+				if s.expr == nil {
+					continue
+				}
+				val, err := evaluate(s.expr, ctx)
+				if err != nil {
+					return fmt.Errorf("%s: filter interpolation: %w", path, err)
+				}
+				if vals.Len() > 0 {
+					vals.WriteByte(',')
+				}
+				if err := writeJSValue(&vals, s.place, val); err != nil {
+					return fmt.Errorf("%s: filter interpolation: %w", path, err)
+				}
+			}
 		}
-		writeJSStringContent(buf, s)
-		return nil
-	case placeCSS:
-		switch v := val.(type) {
-		case SafeCSS:
-			buf.WriteString(string(v))
-		case int, int64, float64:
-			buf.WriteString(stringify(v))
-		default:
-			return fmt.Errorf("a :css value must be a number or hml.SafeCSS, got %s", typeName(val))
+		name = jsValuesName(vals.String())
+		buf.WriteString("var ")
+		buf.Write(name)
+		buf.WriteString(" = [")
+		buf.WriteString(vals.String())
+		buf.WriteString("];\n")
+	}
+	i := 0
+	for _, segs := range n.filterSegs {
+		for _, s := range segs {
+			if s.expr == nil {
+				buf.WriteString(s.lit)
+				continue
+			}
+			if s.place == placeJSString {
+				buf.WriteString("${")
+			}
+			buf.Write(name)
+			buf.WriteByte('[')
+			buf.WriteString(strconv.Itoa(i))
+			buf.WriteByte(']')
+			if s.place == placeJSString {
+				buf.WriteByte('}')
+			}
+			i++
 		}
+		buf.WriteByte('\n')
+	}
+	buf.WriteString("</script>\n")
+	return nil
+}
+
+// jsValuesName names the array of a :javascript block: __hml_ and the
+// 64-bit FNV-1a hash of the array, in hex.
+func jsValuesName(vals string) []byte {
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(vals); i++ {
+		h ^= uint64(vals[i])
+		h *= 1099511628211
+	}
+	name := append(make([]byte, 0, 22), "__hml_"...)
+	return strconv.AppendUint(name, h, 16)
+}
+
+// writeJSValue writes a value as one element of a :javascript block's
+// array. In a string place, the value is its text, as a quoted string,
+// so nil reads as "" and 42 as "42", as they would in markup. In
+// code, a string is a quoted string, a number, a bool, and nil are 42,
+// true, and null, a SafeJS value is the expression the handler built,
+// in ( ) so a comma in it cannot add an element, and any other value
+// is its JSON.
+func writeJSValue(buf *strings.Builder, place filterPlace, val any) error {
+	if place == placeJSString {
+		buf.WriteByte('"')
+		writeJSStringContent(buf, stringify(val))
+		buf.WriteByte('"')
 		return nil
 	}
 	switch v := val.(type) {
 	case nil:
 		buf.WriteString("null")
 	case SafeJS:
+		buf.WriteByte('(')
 		buf.WriteString(string(v))
+		buf.WriteByte(')')
 	case bool, int, int64, float64:
 		buf.WriteString(stringify(v))
 	case string, authored, SafeString, SafeCSS:
@@ -604,7 +673,7 @@ func writeFilterValue(buf *strings.Builder, place filterPlace, val any) error {
 	return nil
 }
 
-// jsValueOptions sets how writeFilterValue writes a map, a slice, or a
+// jsValueOptions sets how writeJSValue writes a map, a slice, or a
 // struct as JSON in a script. The output must not end the script
 // element, so EscapeForHTML writes <, >, and & as \u escapes, and
 // EscapeForJS writes U+2028 and U+2029 as \u escapes. The other
@@ -622,29 +691,6 @@ var jsValueOptions = json.JoinOptions(
 		return strconv.AppendInt(nil, int64(d), 10), nil
 	})),
 )
-
-// endsInMarkupPrefix says out ends in the start of a </script or a <!--
-// token, in any letter case. The HTML tokenizer, not JavaScript,
-// decides where a script element ends. A value written next could
-// complete the token, even inside a JavaScript string, and end the
-// element or move the tokenizer into an escaped state. A value cannot
-// start such a token, because writeJSStringContent escapes <. So the
-// text before the value is the only way in. strings.Builder.String
-// does not copy, so the check costs no allocation.
-func endsInMarkupPrefix(out string) bool {
-	tail := out[max(0, len(out)-len("</script")):]
-	i := strings.LastIndexByte(tail, '<')
-	if i < 0 {
-		return false
-	}
-	tail = tail[i:]
-	for _, token := range []string{"</script", "<!--"} {
-		if len(tail) < len(token) && strings.EqualFold(tail, token[:len(tail)]) {
-			return true
-		}
-	}
-	return false
-}
 
 // writeJSEscape writes the ASCII byte c as a \u escape.
 func writeJSEscape(buf *strings.Builder, c byte) {

@@ -33,7 +33,8 @@ const (
 	placeNone filterPlace = iota
 	// placeJSValue is JavaScript code, where a value is an expression.
 	placeJSValue
-	// placeJSString is inside a JavaScript string or template literal.
+	// placeJSString is inside a template literal, or a quoted string
+	// that Parse rewrites as one.
 	placeJSString
 	// placeCSS is anywhere in a :css block.
 	placeCSS
@@ -119,35 +120,9 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 				return fmt.Errorf("%s: render %q: %w", path, n.text, err)
 			}
 		case kindFilter:
-			segs := make([][]interpSeg, len(n.filterLines))
-			var js jsLexer
-			for j, line := range n.filterLines {
-				s, err := compileInterp(stripFilterIndent(line, n.indent))
-				if err != nil {
-					return fmt.Errorf("%s: filter interpolation: %w", path, err)
-				}
-				for k := range s {
-					switch {
-					case n.filterName == "css":
-						s[k].place = placeCSS
-					case s[k].expr == nil:
-						js.read(s[k].lit)
-					default:
-						place, err := js.place()
-						if err != nil {
-							return fmt.Errorf("%s:%d: :javascript interpolation %w", path, n.line+j+1, err)
-						}
-						s[k].place = place
-					}
-				}
-				if n.filterName != "css" {
-					if err := js.endLine(stripFilterIndent(line, n.indent)); err != nil {
-						return fmt.Errorf("%s:%d: :javascript line %w", path, n.line+j+1, err)
-					}
-				}
-				segs[j] = s
+			if err := compileFilter(n, path); err != nil {
+				return err
 			}
-			n.filterSegs = segs
 		}
 		if err := compileNodes(n.children, path, transforms); err != nil {
 			return err
@@ -157,6 +132,71 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 		if n.kind == kindTag {
 			n.layout = layoutOf(n.tag, n.children)
 		}
+	}
+	return nil
+}
+
+// compileFilter splits each line of a filter block into literal text
+// and #{} values, and records the place of each value.
+//
+// A :javascript block takes two passes of jsLexer over the same text.
+// The first finds the place of each value, refuses a place where no
+// value can go, and notes each quoted string that holds a value. The
+// second rewrites each such string as a template literal, so the value
+// becomes a ${} substitution and the string stays one token. Both
+// passes read the same text, so they count the same strings.
+func compileFilter(n *node, path string) error {
+	segs := make([][]interpSeg, len(n.filterLines))
+	lines := make([]string, len(n.filterLines))
+	var js jsLexer
+	for j, line := range n.filterLines {
+		lines[j] = stripFilterIndent(line, n.indent)
+		s, err := compileInterp(lines[j])
+		if err != nil {
+			return fmt.Errorf("%s: filter interpolation: %w", path, err)
+		}
+		segs[j] = s
+		for k := range s {
+			switch {
+			case n.filterName == "css":
+				s[k].place = placeCSS
+			case s[k].expr == nil:
+				js.read(s[k].lit)
+				js.out.Reset()
+			default:
+				place, err := js.place()
+				if err != nil {
+					return fmt.Errorf("%s:%d: :javascript interpolation %w", path, n.line+j+1, err)
+				}
+				s[k].place = place
+				n.filterValues++
+			}
+		}
+		if n.filterName != "css" {
+			if err := js.endLine(lines[j]); err != nil {
+				return fmt.Errorf("%s:%d: :javascript line %w", path, n.line+j+1, err)
+			}
+		}
+	}
+	n.filterSegs = segs
+	if len(js.withValue) == 0 {
+		return nil
+	}
+	conv := jsLexer{convert: js.withValue}
+	for j, s := range segs {
+		for k := range s {
+			if s[k].expr != nil {
+				_, _ = conv.place()
+				continue
+			}
+			conv.read(s[k].lit)
+			s[k].lit = conv.out.String()
+			conv.out.Reset()
+			if conv.err != nil {
+				return fmt.Errorf("%s:%d: :javascript string %w", path, n.line+j+1, conv.err)
+			}
+		}
+		_ = conv.endLine(lines[j])
 	}
 	return nil
 }
@@ -377,13 +417,13 @@ func compileRender(n *node) error {
 // writes a classic script, where the browser reads both as comments.
 //
 // A slash in code starts a regular expression or is a division. As in
-// html/template, the token before the slash decides. A wrong choice can
-// read a quote as the start of a string that the browser does not see.
-// The value after it would then render as string content with no
-// quotes, in code, and run. JavaScript ends no quoted string and no
-// regular expression at a line end, so endLine refuses a line that
-// ends in one. Such a line shows that the lexer and the browser
-// disagree. doc.go names the limit that remains.
+// html/template, the token before the slash decides. A wrong choice
+// can read a quote as the start of a string that the browser does not
+// see. No value is in the script source (see renderFilter), so a wrong
+// choice gives a wrong script, not data that runs as code. JavaScript
+// ends no quoted string and no regular expression at a line end, so
+// endLine refuses a line that ends in one. Such a line shows that the
+// lexer and the browser disagree, and the error names the line.
 type jsLexer struct {
 	state jsState
 	// braces counts the open { of each ${ in a template literal that
@@ -401,6 +441,17 @@ type jsLexer struct {
 	// codeOnLine says the line holds code before the current byte. A
 	// --> is a comment only when it does not.
 	codeOnLine bool
+	// strs counts the quoted strings opened so far. withValue holds
+	// the number of each one that holds a #{}. A second pass sets
+	// convert to the first pass's withValue, and read writes each such
+	// string to out as a template literal. converting says the string
+	// open now is one, and err records a string that cannot be one.
+	strs       int
+	withValue  map[int]bool
+	convert    map[int]bool
+	converting bool
+	out        strings.Builder
+	err        error
 }
 
 type jsState uint8
@@ -425,18 +476,47 @@ var jsRegexAfterWord = map[string]bool{
 	"await": true,
 }
 
+// read reads s and writes it to out, with each string in convert
+// rewritten as a template literal.
 func (l *jsLexer) read(s string) {
 	for i := 0; i < len(s); i++ {
+		start := i
 		c := s[i]
 		switch l.state {
 		case jsCode:
 			l.readCode(s, &i)
+			if c == '"' || c == '\'' {
+				l.strs++
+				l.converting = l.convert[l.strs]
+				if l.converting {
+					l.out.WriteByte('`')
+					continue
+				}
+			}
 		case jsDouble, jsSingle:
-			if c == '\\' {
+			switch {
+			case c == '\\':
+				// A template literal has no octal escape: \1 to \9, or
+				// \0 before a digit, is a SyntaxError there.
+				if l.converting && i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '9' &&
+					(s[i+1] != '0' || i+2 < len(s) && s[i+2] >= '0' && s[i+2] <= '9') {
+					l.err = fmt.Errorf("with a #{} holds an octal escape: write it as \\x or \\u")
+				}
 				i++
-			} else if (c == '"' && l.state == jsDouble) || (c == '\'' && l.state == jsSingle) {
+			case (c == '"' && l.state == jsDouble) || (c == '\'' && l.state == jsSingle):
 				l.state = jsCode
 				l.operand()
+				if l.converting {
+					l.converting = false
+					l.out.WriteByte('`')
+					continue
+				}
+			case l.converting && c == '`':
+				l.out.WriteString("\\`")
+				continue
+			case l.converting && c == '$' && i+1 < len(s) && s[i+1] == '{':
+				l.out.WriteString("\\$")
+				continue
 			}
 		case jsTemplate:
 			switch {
@@ -475,6 +555,7 @@ func (l *jsLexer) read(s string) {
 				l.state = jsRegex
 			}
 		}
+		l.out.WriteString(s[start:min(i+1, len(s))])
 	}
 }
 
@@ -574,14 +655,21 @@ func isIdentByte(c byte) bool {
 }
 
 // place says where a #{} at the current position sits, and refuses a
-// position where no escape makes a value safe: a comment and a regular
-// expression. The value counts as an operand for the next token.
+// position where a value has no meaning: a comment and a regular
+// expression. The value counts as an operand for the next token. A
+// value in a quoted string marks the string for a template literal.
 func (l *jsLexer) place() (filterPlace, error) {
 	switch l.state {
 	case jsCode:
 		l.operand()
 		return placeJSValue, nil
-	case jsDouble, jsSingle, jsTemplate:
+	case jsDouble, jsSingle:
+		if l.withValue == nil {
+			l.withValue = map[int]bool{}
+		}
+		l.withValue[l.strs] = true
+		return placeJSString, nil
+	case jsTemplate:
 		return placeJSString, nil
 	case jsLineComment, jsBlockComment:
 		return placeNone, fmt.Errorf("in a comment: move the value out of the comment")

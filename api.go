@@ -54,8 +54,8 @@ type Template struct {
 type SafeString string
 
 // SafeJS marks a string the handler asserts is JavaScript source safe to
-// place in an on* event-handler attribute, or as code in a :javascript
-// block. Without it, a dynamic on* value is a render error, and a
+// place in an on* event-handler attribute, or as an expression in a
+// :javascript block. Without it, a dynamic on* value is a render error, and a
 // :javascript value outside a string is a quoted literal: the renderer
 // cannot tell data from code.
 type SafeJS string
@@ -364,6 +364,9 @@ type node struct {
 	elseCount  int
 	textSegs   []interpSeg   // static text interpolation
 	filterSegs [][]interpSeg // filter lines, indent stripped, per line
+	// filterValues counts the #{} in a filter block, so renderFilter
+	// writes no value array for a block with none.
+	filterValues int
 
 	// Compiled render call (kindRender), replacing per-render regexp +
 	// tokenize. Exactly one of renderNameSegs / renderNameExpr is set.

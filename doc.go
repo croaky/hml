@@ -96,35 +96,44 @@
 //     returns an error for any other name. It never builds a file path
 //     from it.
 //
-//   - A #{} in a :javascript block is escaped for where it sits, as
-//     html/template does in a script. Parse reads the script around
-//     each #{} and records its place, so a render does no lexing.
-//     Inside a string or a template literal, the value is string
-//     content: each quote, the backslash, $, <, >, &, a control
-//     character, and U+2028 and U+2029 become \u escapes. In code, a
-//     string becomes a quoted literal with the same escapes; a number,
-//     a bool, and nil become 42, true, and null; a SafeJS value is
-//     written as it is; and any other value becomes its JSON. So
-//     "#{name}" and f(#{name}) are both safe, and no value can end
-//     its string or the script element.
+//   - No #{} value goes into the source of a :javascript block. The
+//     block starts with one statement that holds every value, in order,
+//     as an element of an array, and each #{} becomes a read of its
+//     element:
 //
-//     The HTML tokenizer, not JavaScript, decides where the script
-//     element ends, even inside a JavaScript string. So a value in a
-//     string also cannot complete </script or <!-- with the text
-//     before it, in any letter case. When the output ends in the start
-//     of either token, as in "<#{tag}>", the first character of the
-//     value becomes a \u escape. The string holds the same text.
+//     :javascript                  <script>
+//     go("/users/#{id}", #{n});  var __hml_9f2c = ["7",42];
+//     go(`/users/${__hml_9f2c[0]}`, __hml_9f2c[1]);
+//     </script>
+//
+//     Parse rewrites a quoted string that holds a #{} as a template
+//     literal, so the string stays one token and the value is a ${}
+//     substitution. A backtick and a ${ in the string stay text.
+//
+//     Why: an escape keeps a value safe only in the place it was made
+//     for. Parse finds that place with a small lexer, and a wrong
+//     answer once made data in code render as string content and run.
+//     With the array, a wrong answer moves only text the author or hml
+//     wrote, so the script can be wrong but data never runs as code.
+//     The array is JSON with <, >, &, U+2028, and U+2029 as \u
+//     escapes, so no value can end the script element or start a
+//     comment. The array is a var whose name holds a hash of its
+//     values, so two blocks on one page keep their own values, also in
+//     a function that runs later.
+//
+//     In a string, a value is its text, as in markup: 42 reads as "42"
+//     and nil as "". In code, a string is a string; a number, a bool,
+//     and nil are 42, true, and null; a SafeJS value is the expression
+//     Go built, in ( ); and any other value is its JSON.
 //
 //     A #{} in a comment or a regular expression is a Parse error,
-//     because no escape makes a value safe there.
-//
-//     Parse also refuses a :javascript line that ends inside a quoted
+//     because a value has no meaning there. So is an octal escape such
+//     as \1 in a string that holds a #{}, because a template literal
+//     has none. Parse also refuses a line that ends inside a quoted
 //     string, unless a backslash continues the string, and a line that
 //     ends inside a regular expression. JavaScript allows neither, so
-//     such a line shows that the lexer and the browser read the script
-//     in different ways. Without the rule, a value that the browser
-//     reads as code would render as string content, with no quotes,
-//     and run.
+//     such a line shows that the lexer and the browser disagree, and
+//     the error names the line before a page runs the wrong script.
 //
 //   - A #{} in a :css block takes a number or a SafeCSS value, and
 //     anything else is a render error. CSS has no string escape that
@@ -140,10 +149,11 @@
 //     postfix ++ or --, or a property name such as a.in is a division.
 //     A slash after an operator or a keyword such as return starts a
 //     regular expression. A script that defeats that choice, and
-//     balances its quotes again on the same line, can move a #{} from
-//     code into a string or back. A value that moves into code runs as
-//     code. Keep regular expressions that hold a quote out of a block
-//     with a #{}.
+//     balances its quotes again on the same line, renders a wrong
+//     script that the browser refuses or runs wrong. Keep regular
+//     expressions that hold a quote out of a block with a #{}.
+//   - A tagged template, such as String.raw`a#{v}`, gets the value as
+//     a substitution, not as text in its strings.
 //   - Attribute rules key off the attribute name, not the value. The
 //     renderer will not tell a well-formed http URL from one pointing
 //     somewhere you did not intend, and it does not parse CSS or JS
@@ -289,9 +299,9 @@
 //   - In a :javascript block, write a value as the data it is:
 //     "#{name}" for text, f(#{count}) for a number, f(#{opts}) for a
 //     map. Do not escape it in Go first, because the engine escapes it
-//     again. Mark a value SafeJS only when Go built it as code, for
-//     example with encoding/json/v2 and jsontext.EscapeForHTML(true),
-//     which escapes <, >, and &.
+//     again. Mark a value SafeJS only when Go built it as an
+//     expression, for example with encoding/json/v2 and
+//     jsontext.EscapeForHTML(true), which escapes <, >, and &.
 //
 // # Subset grammar
 //
@@ -308,7 +318,7 @@
 //	- if expr / - else if / - else  conditionals
 //	- for item in items             loops (optional index: for i, item)
 //	= render "name", key: val       partials
-//	:javascript / :css              filter blocks (#{} escaped by place)
+//	:javascript / :css              filter blocks (#{} by place)
 //	-#                              comments (omitted from output)
 //	static text with #{field}       text interpolation (escaped)
 //
