@@ -207,7 +207,7 @@ security model. A change to the grammar, the value semantics, the
 attribute policy, or the shape of the output updates it in the same
 commit. Say _why_ there; the code says what.
 
-Plans live in `todo/planned` and are reviewed as ordinary changes. A
+Plans live in `todo/` and are reviewed as ordinary changes. A
 numeric prefix means land in this order; unnumbered siblings are
 parallel and pickable anytime. Delete a plan's text as it ships rather
 than leaving a record of work already done.
