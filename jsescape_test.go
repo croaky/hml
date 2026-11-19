@@ -3,6 +3,7 @@ package hml
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/croaky/is"
 )
@@ -61,6 +62,40 @@ func TestJavaScriptWritesAValueOutsideAStringAsALiteral(t *testing.T) {
 		{`x = #{n} / 2;`, `x = 42 / 2;`},
 		// The value inside "..." is string content, so a number writes as text.
 		{`x = "n=#{n}";`, `x = "n=42";`},
+	} {
+		is.Eq(renderJS(t, c.src, locals), c.want)
+	}
+}
+
+func TestJavaScriptEscapesAJSONValueForTheScriptElement(t *testing.T) {
+	is := is.New(t)
+	locals := map[string]any{
+		"m": map[string]any{"k": "</script>&\u2028\u2029"},
+		"s": []string{"</script>&\u2028\u2029"},
+	}
+	const want = `"\u003c/script\u003e\u0026\u2028\u2029"`
+	is.Eq(renderJS(t, `f(#{m});`, locals), `f({"k":`+want+`});`)
+	is.Eq(renderJS(t, `f(#{s});`, locals), `f([`+want+`]);`)
+}
+
+func TestJavaScriptWritesAJSONValueAsEncodingJSONV1Did(t *testing.T) {
+	is := is.New(t)
+	locals := map[string]any{
+		"keys":    map[string]int64{"b": 2, "a": 1, "B": 3, "c": 4},
+		"nilList": []string(nil),
+		"nilMap":  map[string]any(nil),
+		"badUTF8": []string{"a\xffb"},
+		"dur":     []time.Duration{1500 * time.Millisecond},
+	}
+	for _, c := range []struct{ src, want string }{
+		// Map keys are in sorted order, so a page renders the same each time.
+		{`f(#{keys});`, `f({"B":3,"a":1,"b":2,"c":4});`},
+		{`f(#{nilList});`, `f(null);`},
+		{`f(#{nilMap});`, `f(null);`},
+		// v1 wrote the escape \ufffd. v2 writes the character. Both
+		// give the same JavaScript string.
+		{`f(#{badUTF8});`, "f([\"a\uFFFDb\"]);"},
+		{`f(#{dur});`, `f([1500000000]);`},
 	} {
 		is.Eq(renderJS(t, c.src, locals), c.want)
 	}

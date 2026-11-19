@@ -1,7 +1,8 @@
 package hml
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"html"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var voidElements = map[string]bool{
@@ -587,9 +589,7 @@ func writeFilterValue(buf *strings.Builder, place filterPlace, val any) error {
 		writeJSStringContent(buf, stringify(v))
 		buf.WriteByte('"')
 	default:
-		// encoding/json writes <, >, &, U+2028, and U+2029 as \u
-		// escapes, and escapes each quote inside a string.
-		b, err := json.Marshal(v)
+		b, err := json.Marshal(v, jsValueOptions)
 		if err != nil {
 			return fmt.Errorf("a :javascript value: %w", err)
 		}
@@ -597,6 +597,25 @@ func writeFilterValue(buf *strings.Builder, place filterPlace, val any) error {
 	}
 	return nil
 }
+
+// jsValueOptions sets how writeFilterValue writes a map, a slice, or a
+// struct as JSON in a script. The output must not end the script
+// element, so EscapeForHTML writes <, >, and & as \u escapes, and
+// EscapeForJS writes U+2028 and U+2029 as \u escapes. The other
+// options keep the output of encoding/json v1, so a page does not
+// change: map keys in sorted order, null for a nil slice or map,
+// U+FFFD for invalid UTF-8, and a time.Duration as its nanoseconds.
+var jsValueOptions = json.JoinOptions(
+	jsontext.EscapeForHTML(true),
+	jsontext.EscapeForJS(true),
+	json.Deterministic(true),
+	json.FormatNilSliceAsNull(true),
+	json.FormatNilMapAsNull(true),
+	jsontext.AllowInvalidUTF8(true),
+	json.WithMarshalers(json.MarshalFunc(func(d time.Duration) ([]byte, error) {
+		return strconv.AppendInt(nil, int64(d), 10), nil
+	})),
+)
 
 // writeJSStringContent writes s as the content of a JavaScript string,
 // a template literal, or a quoted literal. It escapes each quote, the

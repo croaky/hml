@@ -270,7 +270,8 @@
 //     "#{name}" for text, f(#{count}) for a number, f(#{opts}) for a
 //     map. Do not escape it in Go first, because the engine escapes it
 //     again. Mark a value SafeJS only when Go built it as code, for
-//     example with encoding/json, which escapes <, >, and &.
+//     example with encoding/json/v2 and jsontext.EscapeForHTML(true),
+//     which escapes <, >, and &.
 //
 // # Subset grammar
 //
