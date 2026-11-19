@@ -1,6 +1,8 @@
 package hml
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -566,10 +568,10 @@ func renderFilter(n node, buf *strings.Builder, ctx context, path string) error 
 // runs as code. The array is JSON with <, >, and & as \u escapes, so no
 // value can end the script element either.
 //
-// The name holds a hash of the array. A page that holds two blocks has
-// two globals, and a function in one block that runs later reads its
-// own values, not the other block's. Two blocks with the same values
-// share one name and the same array.
+// The name holds a SHA-256 hash of the array (see jsValuesName). A
+// page that holds two blocks has two globals, and a function in one
+// block that runs later reads its own values, not the other block's.
+// Two blocks with the same values share one name and the same array.
 func renderJavaScript(n node, buf *strings.Builder, ctx context, path string) error {
 	buf.WriteString("<script>\n")
 	var name []byte
@@ -625,15 +627,24 @@ func renderJavaScript(n node, buf *strings.Builder, ctx context, path string) er
 }
 
 // jsValuesName names the array of a :javascript block: __hml_ and the
-// 64-bit FNV-1a hash of the array, in hex.
+// first 128 bits of the SHA-256 hash of the array, in hex.
+//
+// The name is all that keeps the arrays of two blocks on a page apart,
+// and an end user can choose a value in one block. The hash must
+// therefore be one that no choice of values can steer to the name of
+// another block. A hash with no such property, such as FNV-1a, lets a
+// search of 2^32 steps give a block the name of an earlier block. Its
+// var then replaces the earlier array, and the earlier block's later
+// code reads the attacker's values. To steer a SHA-256 name, an
+// attacker must find a second preimage of 128 bits.
+//
+// The name stays a function of the values only, so a page renders the
+// same each time, and a script that a client loader runs again finds
+// its array.
 func jsValuesName(vals string) []byte {
-	h := uint64(14695981039346656037)
-	for i := 0; i < len(vals); i++ {
-		h ^= uint64(vals[i])
-		h *= 1099511628211
-	}
-	name := append(make([]byte, 0, 22), "__hml_"...)
-	return strconv.AppendUint(name, h, 16)
+	sum := sha256.Sum256([]byte(vals))
+	name := append(make([]byte, 0, 38), "__hml_"...)
+	return hex.AppendEncode(name, sum[:16])
 }
 
 // writeJSValue writes a value as one element of a :javascript block's

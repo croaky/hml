@@ -210,6 +210,24 @@ func TestJavaScriptNamesTheArrayForItsValues(t *testing.T) {
 	is.Eq(renderJS(t, "f(#{v});", map[string]any{"v": "a"}), a)
 }
 
+// An end user who controls a value in one block can pick it so that
+// its array takes the name of another block's array. The second var
+// then replaces the first, and the first block's later code reads the
+// attacker's values. The two values here give the same 64-bit FNV-1a
+// hash, the name hml once used. A Pollard rho search found them in
+// 2^32 steps, so an attacker can find such a pair too.
+func TestJavaScriptKeepsTwoBlocksApartWhenTheirValuesCollide(t *testing.T) {
+	is := is.New(t)
+	src := ":javascript\n  later(() => a(#{x}));\n:javascript\n  b(#{y});\n"
+	out, err := mustParse(t, src).Render(map[string]any{"x": "594916704ce9bfe0", "y": "1deb96001e2b73d2"}, nil)
+	is.NoErr(err)
+	nameA := string(jsValuesName(`"594916704ce9bfe0"`))
+	nameB := string(jsValuesName(`"1deb96001e2b73d2"`))
+	is.NotEq(nameA, nameB)
+	is.Eq(out, "<script>\nvar "+nameA+" = [\"594916704ce9bfe0\"];\nlater(() => a("+nameA+"[0]));\n</script>\n"+
+		"<script>\nvar "+nameB+" = [\"1deb96001e2b73d2\"];\nb("+nameB+"[0]);\n</script>\n")
+}
+
 func TestJavaScriptReadsHTMLLikeCommentsAsComments(t *testing.T) {
 	is := is.New(t)
 	v := map[string]any{"v": "alert(1)"}
