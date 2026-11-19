@@ -130,8 +130,44 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 		// The layout reads the kind of each child, and compileNodes
 		// turns a call child into an output or a transform above.
 		if n.kind == kindTag {
+			if codeElements[strings.ToLower(n.tag)] {
+				if err := literalBody(n.tag, n.children, path); err != nil {
+					return err
+				}
+			}
 			n.layout = layoutOf(n.tag, n.children)
 		}
+	}
+	return nil
+}
+
+// codeElements are the elements whose content the browser runs as
+// code. HTML names are not case-sensitive, so the key is lowercase. In
+// %svg or %math, the browser decodes &#39; and &#34; in a script or a
+// style element before it runs one, so the HTML escape protects even
+// less there.
+var codeElements = map[string]bool{"script": true, "style": true}
+
+// literalBody refuses any child of a script or style tag except a
+// comment or a line of text with no #{}. The renderer writes every
+// other child through the HTML escape, or as a SafeString with no
+// escape. The HTML escape stops markup, not code: a backslash, a
+// newline, a backtick, or a parenthesis passes it. :javascript and :css
+// have an encoder for a value, and an attribute has the attribute
+// policy. A %script or %style body has neither, so it takes no value.
+//
+// A - if, a - for, a = render, and a nested tag are refused too. Each
+// can bring a value into the body, and none has a use there that
+// :javascript or :css does not cover.
+func literalBody(tag string, children []node, path string) error {
+	for _, c := range children {
+		if c.kind == kindComment {
+			continue
+		}
+		if c.kind == kindText && !slices.ContainsFunc(c.textSegs, func(s interpSeg) bool { return s.expr != nil }) {
+			continue
+		}
+		return fmt.Errorf("%s:%d: %%%s takes only literal text, because the browser runs it as code: put a value in :javascript or :css, or in a data-* attribute", path, c.line, tag)
 	}
 	return nil
 }

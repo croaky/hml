@@ -139,10 +139,27 @@
 //     anything else is a render error. CSS has no string escape that
 //     holds in every place, so the handler builds the CSS.
 //
+//   - The body of a %script or %style tag takes only literal text and
+//     comments, in any letter case of the tag, also inside %svg and
+//     %math. Parse refuses any other child: a #{}, an = line, a call,
+//     a partial, a condition, a loop, or a nested tag. The browser runs
+//     that body as code, and the HTML escape stops markup, not code.
+//     Put a value in :javascript or :css, which encode it. A script
+//     element that needs an attribute such as nonce, and also a value,
+//     takes the value in a data-* attribute, and the script reads it
+//     from document.currentScript.dataset:
+//
+//     %script{ nonce: nonce, "data-id": id }
+//     load(document.currentScript.dataset.id);
+//
 // What the renderer does NOT guarantee:
 //
 //   - No context awareness in body text. = output and #{}
-//     interpolation in body text get uniform html.EscapeString.
+//     interpolation in body text get uniform html.EscapeString. A
+//     script or style element that a line of text types as markup,
+//     such as <script>f("#{v}")</script>, is text to hml, and its
+//     value gets that escape only. Write a %script tag or :javascript
+//     instead.
 //   - The :javascript lexer knows strings, template literals, comments
 //     (//, /* */, <!--, and a --> at the start of a line), and regular
 //     expressions, and nothing else. A slash after an operand, a
