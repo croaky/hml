@@ -351,9 +351,16 @@ breaking release so far has been sized wrong until this was run.
 Bump each user in the same sitting. Two versions of the engine in use at
 once means the next change has to reason about both.
 
-There are four users now: blog joined when its pages became `.hml`.
-That is the condition this section named as the end of the cheap
-breaking change, so the next constraint needs a deprecation path rather
-than an afternoon of bumping callers. A constraint that no user breaks
-needs none. Show that with the `replace` check above on every user
-before the tag.
+Five repos use hml now: blog, chart, sockeye, sports, and one private
+app. A count in a doc goes stale, so list the users before each tag.
+This command finds each `go.mod` under `$HOME` that requires hml:
+
+```sh
+rg -l --max-depth 2 'croaky/hml v' -g go.mod ~
+```
+
+Blog joined when its pages became `.hml`. That is the condition this
+section named as the end of the cheap breaking change, so the next
+constraint needs a deprecation path rather than an afternoon of bumping
+callers. A constraint that no user breaks needs none. Show that with
+the `replace` check above on every user before the tag.
