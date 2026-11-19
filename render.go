@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 var voidElements = map[string]bool{
@@ -564,7 +565,12 @@ func renderFilter(n node, buf *strings.Builder, ctx context, path string) error 
 func writeFilterValue(buf *strings.Builder, place filterPlace, val any) error {
 	switch place {
 	case placeJSString:
-		writeJSStringContent(buf, stringify(val))
+		s := stringify(val)
+		if s != "" && s[0] < utf8.RuneSelf && endsInMarkupPrefix(buf.String()) {
+			writeJSEscape(buf, s[0])
+			s = s[1:]
+		}
+		writeJSStringContent(buf, s)
 		return nil
 	case placeCSS:
 		switch v := val.(type) {
@@ -617,19 +623,47 @@ var jsValueOptions = json.JoinOptions(
 	})),
 )
 
+// endsInMarkupPrefix says out ends in the start of a </script or a <!--
+// token, in any letter case. The HTML tokenizer, not JavaScript,
+// decides where a script element ends. A value written next could
+// complete the token, even inside a JavaScript string, and end the
+// element or move the tokenizer into an escaped state. A value cannot
+// start such a token, because writeJSStringContent escapes <. So the
+// text before the value is the only way in. strings.Builder.String
+// does not copy, so the check costs no allocation.
+func endsInMarkupPrefix(out string) bool {
+	tail := out[max(0, len(out)-len("</script")):]
+	i := strings.LastIndexByte(tail, '<')
+	if i < 0 {
+		return false
+	}
+	tail = tail[i:]
+	for _, token := range []string{"</script", "<!--"} {
+		if len(tail) < len(token) && strings.EqualFold(tail, token[:len(tail)]) {
+			return true
+		}
+	}
+	return false
+}
+
+// writeJSEscape writes the ASCII byte c as a \u escape.
+func writeJSEscape(buf *strings.Builder, c byte) {
+	const hex = "0123456789abcdef"
+	buf.WriteString(`\u00`)
+	buf.WriteByte(hex[c>>4])
+	buf.WriteByte(hex[c&0xf])
+}
+
 // writeJSStringContent writes s as the content of a JavaScript string,
 // a template literal, or a quoted literal. It escapes each quote, the
 // backslash, $, the characters of HTML markup, the control characters,
 // and the two line separators, so the content cannot end its string,
 // start a substitution, or end the script element.
 func writeJSStringContent(buf *strings.Builder, s string) {
-	const hex = "0123456789abcdef"
 	for _, r := range s {
 		switch {
 		case r < 0x20 || strings.ContainsRune("\"'`\\$<>&", r):
-			buf.WriteString(`\u00`)
-			buf.WriteByte(hex[r>>4])
-			buf.WriteByte(hex[r&0xf])
+			writeJSEscape(buf, byte(r))
 		case r == '\u2028':
 			buf.WriteString(`\u2028`)
 		case r == '\u2029':

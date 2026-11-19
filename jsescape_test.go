@@ -1,6 +1,8 @@
 package hml
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -194,6 +196,42 @@ func TestJavaScriptReadsASlashAfterAnOperandAsADivision(t *testing.T) {
 	// A slash after a keyword still starts a regular expression.
 	is.Eq(renderJS(t, "return /'/.test(s) && f(#{v});", v), "return /'/.test(s) && f(\"alert(1)\");")
 	is.Eq(renderJS(t, "x = typeof /'/;\nf(#{v});", v), "x = typeof /'/;\nf(\"alert(1)\");")
+}
+
+// jsUnescapeU reads each \uXXXX escape in s as the rune it names, as
+// JavaScript does in a string.
+func jsUnescapeU(s string) string {
+	return regexp.MustCompile(`\\u[0-9a-f]{4}`).ReplaceAllStringFunc(s, func(e string) string {
+		n, _ := strconv.ParseUint(e[2:], 16, 32)
+		return string(rune(n))
+	})
+}
+
+func TestJavaScriptValueCannotEndTheScriptWithTheTextBeforeIt(t *testing.T) {
+	is := is.New(t)
+	for _, q := range []string{`"`, `'`, "`"} {
+		for _, prefix := range []string{"<", "</", "</scr", "</SCR", "<!", "<!-"} {
+			for _, v := range []string{"/script", "script", "ipt", "IPT", "SCRIPT", "/SCRIPT", "!--", "--", "-"} {
+				body := q + prefix + "#{v}" + q + ";"
+				got := renderJS(t, "x = "+body, map[string]any{"v": v})
+				lower := strings.ToLower(got)
+				is.True(!strings.Contains(lower, "</script"))
+				is.True(!strings.Contains(lower, "<!--"))
+				// The JavaScript string holds the same text.
+				is.Eq(jsUnescapeU(got), "x = "+q+prefix+v+q+";")
+			}
+		}
+	}
+	// An empty value does not stop the check for the value after it.
+	got := renderJS(t, `x = "<#{a}#{b}";`, map[string]any{"a": "", "b": "/script"})
+	is.Eq(got, `x = "<\u002fscript";`)
+}
+
+func TestJavaScriptValueAfterOtherTextRendersAsBefore(t *testing.T) {
+	is := is.New(t)
+	is.Eq(renderJS(t, `x = "<#{v}>";`, map[string]any{"v": "b"}), `x = "<\u0062>";`)
+	is.Eq(renderJS(t, `x = "a #{v}";`, map[string]any{"v": "b/c"}), `x = "a b/c";`)
+	is.Eq(renderJS(t, `x = "<p>#{v}";`, map[string]any{"v": "/script"}), `x = "<p>/script";`)
 }
 
 func TestCSSTakesOnlyANumberOrSafeCSS(t *testing.T) {

@@ -106,9 +106,17 @@
 //     a bool, and nil become 42, true, and null; a SafeJS value is
 //     written as it is; and any other value becomes its JSON. So
 //     "#{name}" and f(#{name}) are both safe, and no value can end
-//     its string or the script element. A #{} in a comment or a
-//     regular expression is a Parse error, because no escape makes a
-//     value safe there.
+//     its string or the script element.
+//
+//     The HTML tokenizer, not JavaScript, decides where the script
+//     element ends, even inside a JavaScript string. So a value in a
+//     string also cannot complete </script or <!-- with the text
+//     before it, in any letter case. When the output ends in the start
+//     of either token, as in "<#{tag}>", the first character of the
+//     value becomes a \u escape. The string holds the same text.
+//
+//     A #{} in a comment or a regular expression is a Parse error,
+//     because no escape makes a value safe there.
 //
 //     Parse also refuses a :javascript line that ends inside a quoted
 //     string, unless a backslash continues the string, and a line that

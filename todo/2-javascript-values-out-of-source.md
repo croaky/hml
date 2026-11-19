@@ -1,9 +1,9 @@
 # Move :javascript values out of the script source
 
 This is a design for a breaking release. It names no open finding,
-because the line-end rule in `jsLexer` and
-`todo/javascript-string-edge-escape.md` close them. It removes the
-cause that those findings share.
+because the line-end rule in `jsLexer` and the `endsInMarkupPrefix`
+check in `writeFilterValue` close them. It removes the cause that
+those findings share.
 
 ## Need
 
@@ -45,7 +45,7 @@ execution. A fixed reference inside a real string is text.
 What it removes:
 
 - `placeJSString` and the string branch of `writeJSStringContent`.
-- The edge check in `todo/javascript-string-edge-escape.md`.
+- The `endsInMarkupPrefix` check in `writeFilterValue`.
 - The need for the lexer to be correct for security. The lexer stays
   only to give a clear Parse error.
 
@@ -83,9 +83,8 @@ The new form `"..." + #{x}` renders the same under the current engine,
 because a code value is already a quoted literal. So each user can
 change first, with no break:
 
-1. Ship `todo/javascript-string-edge-escape.md`.
-2. Add a way to list each `#{}` in a string place, such as a method on
+1. Add a way to list each `#{}` in a string place, such as a method on
    `Template` or a command beside `cmd/viewcover`. Each user runs it in
    a test and changes each site it reports.
-3. When every user reports zero sites, release the break: refuse a
+2. When every user reports zero sites, release the break: refuse a
    `#{}` in a string, and write the JSON element.
