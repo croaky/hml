@@ -210,6 +210,17 @@ func TestJavaScriptNamesTheArrayForItsValues(t *testing.T) {
 	is.Eq(renderJS(t, "f(#{v});", map[string]any{"v": "a"}), a)
 }
 
+// An end user whose data reaches two blocks can choose the values of
+// both. A shared name then needs only a collision, not a second
+// preimage. A collision of n bits costs about 2^(n/2) steps, so a
+// name with 128 bits of the hash fell to a search of 2^64 steps. The
+// name holds all 256 bits of the SHA-256 hash of `"a"`, so a
+// collision costs 2^128 steps.
+func TestJavaScriptNamesTheArrayWithTheFullSHA256Hash(t *testing.T) {
+	is := is.New(t)
+	is.Eq(string(jsValuesName(`"a"`)), "__hml_ac8d8342bbb2362d13f0a559a3621bb407011368895164b628a54f7fc33fc43c")
+}
+
 // An end user who controls a value in one block can pick it so that
 // its array takes the name of another block's array. The second var
 // then replaces the first, and the first block's later code reads the

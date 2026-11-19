@@ -117,12 +117,13 @@
 //     wrote, so the script can be wrong but data never runs as code.
 //     The array is JSON with <, >, &, U+2028, and U+2029 as \u
 //     escapes, so no value can end the script element or start a
-//     comment. The array is a var whose name holds the first 128 bits
-//     of the SHA-256 hash of its values. So two blocks on one page
-//     keep their own values, also in a function that runs later, even
-//     when an end user chooses the values of one block. A hash that
-//     values can steer, such as FNV-1a, lets one block take the name
-//     of another, and its var then replaces the other block's array.
+//     comment. The array is a var whose name holds the full SHA-256
+//     hash of its values. So two blocks on one page keep their own
+//     values, also in a function that runs later, even when one end
+//     user chooses values in both blocks. Two arrays then share a name
+//     only after a collision search of 2^128 steps. A hash that values
+//     can steer, such as FNV-1a, lets one block take the name of
+//     another, and its var then replaces the other block's array.
 //
 //     In a string, a value is its text, as in markup: 42 reads as "42"
 //     and nil as "". In code, a string is a string; a number, a bool,

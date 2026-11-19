@@ -627,24 +627,29 @@ func renderJavaScript(n node, buf *strings.Builder, ctx context, path string) er
 }
 
 // jsValuesName names the array of a :javascript block: __hml_ and the
-// first 128 bits of the SHA-256 hash of the array, in hex.
+// full SHA-256 hash of the array, in hex.
 //
 // The name is all that keeps the arrays of two blocks on a page apart,
-// and an end user can choose a value in one block. The hash must
+// and an end user can choose values in a block. The hash must
 // therefore be one that no choice of values can steer to the name of
 // another block. A hash with no such property, such as FNV-1a, lets a
 // search of 2^32 steps give a block the name of an earlier block. Its
 // var then replaces the earlier array, and the earlier block's later
-// code reads the attacker's values. To steer a SHA-256 name, an
-// attacker must find a second preimage of 128 bits.
+// code reads the attacker's values.
+//
+// The name keeps all 256 bits, because one end user's data can reach
+// two blocks, such as a display name in each. The attacker then needs
+// any pair of arrays with one name, not the name of a fixed array. A
+// birthday search finds a pair of n-bit names in about 2^(n/2) steps.
+// So 128 bits gave 2^64 steps, and 256 bits give 2^128 steps.
 //
 // The name stays a function of the values only, so a page renders the
 // same each time, and a script that a client loader runs again finds
 // its array.
 func jsValuesName(vals string) []byte {
 	sum := sha256.Sum256([]byte(vals))
-	name := append(make([]byte, 0, 38), "__hml_"...)
-	return hex.AppendEncode(name, sum[:16])
+	name := append(make([]byte, 0, 6+2*sha256.Size), "__hml_"...)
+	return hex.AppendEncode(name, sum[:])
 }
 
 // writeJSValue writes a value as one element of a :javascript block's
