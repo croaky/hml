@@ -127,6 +127,75 @@ func TestJavaScriptRefusesAValueItCannotPlace(t *testing.T) {
 	is.Eq(renderJS(t, "x = a / #{v};", map[string]any{"v": int64(2)}), "x = a / 2;")
 }
 
+func TestJavaScriptRefusesALineThatEndsInsideAStringOrRegex(t *testing.T) {
+	is := is.New(t)
+	for _, src := range []string{
+		"x = \"a\nb\";",
+		"x = 'a\nb';",
+		"x = \"a\\\\\nb\";",
+		"x = /a\nb/;",
+		"x = /[a\nb]/;",
+		// The lexer reads the slash after ) as a division, so the
+		// quote opens a string that the browser does not see.
+		"if (ok) /'/.test(s);\nf(#{v});",
+	} {
+		_, err := Parse(":javascript\n  "+strings.ReplaceAll(src, "\n", "\n  ")+"\n", "test.hml", nil)
+		is.HasErr(err)
+		is.True(strings.Contains(err.Error(), "test.hml:2:"))
+	}
+}
+
+func TestJavaScriptContinuesAStringOrTemplateAcrossLines(t *testing.T) {
+	is := is.New(t)
+	v := map[string]any{"v": "x"}
+	is.Eq(renderJS(t, "var s = \"a\\\nb #{v}\";", v), "var s = \"a\\\nb x\";")
+	is.Eq(renderJS(t, "var s = 'a\\\nb #{v}';", v), "var s = 'a\\\nb x';")
+	is.Eq(renderJS(t, "var s = `a\n#{v}`;", v), "var s = `a\nx`;")
+	is.Eq(renderJS(t, "/* a\n' */ f(#{v});", v), "/* a\n' */ f(\"x\");")
+}
+
+func TestJavaScriptReadsHTMLLikeCommentsAsComments(t *testing.T) {
+	is := is.New(t)
+	v := map[string]any{"v": "alert(1)"}
+	for _, c := range []struct{ src, want string }{
+		{"<!-- don't remove\ntrack(#{v});", "<!-- don't remove\ntrack(\"alert(1)\");"},
+		{"a = 1; <!-- it's\ntrack(#{v});", "a = 1; <!-- it's\ntrack(\"alert(1)\");"},
+		{"x = 1;\n--> it's legacy\ntrack(#{v});", "x = 1;\n--> it's legacy\ntrack(\"alert(1)\");"},
+		{"/* a */ --> it's\ntrack(#{v});", "/* a */ --> it's\ntrack(\"alert(1)\");"},
+		// After code on the line, --> is a decrement and a >.
+		{"if (a--> 0) f(#{v});", "if (a--> 0) f(\"alert(1)\");"},
+	} {
+		is.Eq(renderJS(t, c.src, v), c.want)
+	}
+	for _, src := range []string{"<!-- #{v}", "x = 1; <!-- #{v}", "--> #{v}"} {
+		_, err := Parse(":javascript\n  "+src+"\n", "test.hml", nil)
+		is.HasErr(err)
+		is.True(strings.Contains(err.Error(), "in a comment"))
+	}
+}
+
+func TestJavaScriptReadsASlashAfterAnOperandAsADivision(t *testing.T) {
+	is := is.New(t)
+	v := map[string]any{"v": "alert(1)"}
+	for _, first := range []string{
+		"var r = done++ / total;",
+		"var r = done-- / total;",
+		"var r = a[i]++ / total;",
+		"var r = a.in / b;",
+		"var r = stats.new / total;",
+		"var r = a?.delete / b;",
+		"var r = ++i / 2;",
+	} {
+		src := first + "\nvar url = \"/users/\" + #{v};"
+		is.Eq(renderJS(t, src, v), first+"\nvar url = \"/users/\" + \"alert(1)\";")
+	}
+	// The same, on one line.
+	is.Eq(renderJS(t, `r = n++ / 2; u = "/u/" + #{v};`, v), `r = n++ / 2; u = "/u/" + "alert(1)";`)
+	// A slash after a keyword still starts a regular expression.
+	is.Eq(renderJS(t, "return /'/.test(s) && f(#{v});", v), "return /'/.test(s) && f(\"alert(1)\");")
+	is.Eq(renderJS(t, "x = typeof /'/;\nf(#{v});", v), "x = typeof /'/;\nf(\"alert(1)\");")
+}
+
 func TestCSSTakesOnlyANumberOrSafeCSS(t *testing.T) {
 	is := is.New(t)
 	tmpl := mustParse(t, ":css\n  .a { width: #{w}px; #{rule} }\n")

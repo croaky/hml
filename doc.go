@@ -110,6 +110,14 @@
 //     regular expression is a Parse error, because no escape makes a
 //     value safe there.
 //
+//     Parse also refuses a :javascript line that ends inside a quoted
+//     string, unless a backslash continues the string, and a line that
+//     ends inside a regular expression. JavaScript allows neither, so
+//     such a line shows that the lexer and the browser read the script
+//     in different ways. Without the rule, a value that the browser
+//     reads as code would render as string content, with no quotes,
+//     and run.
+//
 //   - A #{} in a :css block takes a number or a SafeCSS value, and
 //     anything else is a render error. CSS has no string escape that
 //     holds in every place, so the handler builds the CSS.
@@ -118,12 +126,16 @@
 //
 //   - No context awareness in body text. = output and #{}
 //     interpolation in body text get uniform html.EscapeString.
-//   - The :javascript lexer knows strings, template literals, comments,
-//     and regular expressions, and nothing else. A slash after an
-//     operand is a division, and a slash after an operator or a keyword
-//     such as return starts a regular expression. A script that defeats
-//     that choice can move a #{} out of a regular expression. Keep
-//     regular expressions that hold a quote out of a block with a #{}.
+//   - The :javascript lexer knows strings, template literals, comments
+//     (//, /* */, <!--, and a --> at the start of a line), and regular
+//     expressions, and nothing else. A slash after an operand, a
+//     postfix ++ or --, or a property name such as a.in is a division.
+//     A slash after an operator or a keyword such as return starts a
+//     regular expression. A script that defeats that choice, and
+//     balances its quotes again on the same line, can move a #{} from
+//     code into a string or back. A value that moves into code runs as
+//     code. Keep regular expressions that hold a quote out of a block
+//     with a #{}.
 //   - Attribute rules key off the attribute name, not the value. The
 //     renderer will not tell a well-formed http URL from one pointing
 //     somewhere you did not intend, and it does not parse CSS or JS

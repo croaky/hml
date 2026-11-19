@@ -1,9 +1,9 @@
 # Move :javascript values out of the script source
 
-This is a design for a breaking release. Do it after
-`todo/1-javascript-lexer-fail-closed.md`. It names no open finding,
-because plan 1 and `todo/javascript-string-edge-escape.md` close them.
-It removes the cause that those findings share.
+This is a design for a breaking release. It names no open finding,
+because the line-end rule in `jsLexer` and
+`todo/javascript-string-edge-escape.md` close them. It removes the
+cause that those findings share.
 
 ## Need
 
@@ -18,9 +18,10 @@ two lexers that hml must keep in step with the browser:
   next to literal text can end it early:
   `find_013DCxh7BLakJPVRUn2WF7H3`.
 
-Plan 1 makes the first lexer fail closed. It cannot make the lexer
-correct. An error that does not continue past a line end is still
-open.
+Parse now refuses a line that ends inside a quoted string or a
+regular expression, so the first lexer fails closed. That rule cannot
+make the lexer correct. An error that does not continue past a line
+end is still open.
 
 ## Design
 
@@ -82,7 +83,7 @@ The new form `"..." + #{x}` renders the same under the current engine,
 because a code value is already a quoted literal. So each user can
 change first, with no break:
 
-1. Ship plan 1 and the edge escape plan.
+1. Ship `todo/javascript-string-edge-escape.md`.
 2. Add a way to list each `#{}` in a string place, such as a method on
    `Template` or a command beside `cmd/viewcover`. Each user runs it in
    a test and changes each site it reports.

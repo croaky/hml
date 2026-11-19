@@ -140,7 +140,11 @@ func compileNodes(nodes []node, path string, transforms map[string]Transform) er
 						s[k].place = place
 					}
 				}
-				js.endLine()
+				if n.filterName != "css" {
+					if err := js.endLine(stripFilterIndent(line, n.indent)); err != nil {
+						return fmt.Errorf("%s:%d: :javascript line %w", path, n.line+j+1, err)
+					}
+				}
 				segs[j] = s
 			}
 			n.filterSegs = segs
@@ -368,12 +372,18 @@ func compileRender(n *node) error {
 // jsLexer reads the literal source of a :javascript block, one segment
 // at a time, so that place can say where each #{} sits. It knows the
 // strings, template literals, comments, and regular expressions of
-// JavaScript, and nothing else, which is all a place needs.
+// JavaScript, and nothing else, which is all a place needs. The
+// comments include <!-- and a line-start -->, because renderFilter
+// writes a classic script, where the browser reads both as comments.
 //
 // A slash in code starts a regular expression or is a division. As in
 // html/template, the token before the slash decides. A wrong choice can
-// read a quote in a regular expression as the start of a string. Such
-// a regular expression is rare, and doc.go names the limit.
+// read a quote as the start of a string that the browser does not see.
+// The value after it would then render as string content with no
+// quotes, in code, and run. JavaScript ends no quoted string and no
+// regular expression at a line end, so endLine refuses a line that
+// ends in one. Such a line shows that the lexer and the browser
+// disagree. doc.go names the limit that remains.
 type jsLexer struct {
 	state jsState
 	// braces counts the open { of each ${ in a template literal that
@@ -382,10 +392,15 @@ type jsLexer struct {
 	// last is the last code byte that is not space, and word the
 	// identifier that ends at it, for the regex-or-division choice.
 	// sawSpace says a space follows last, so a new identifier starts
-	// a new word.
+	// a new word. prop says a . comes before word, so word is a
+	// property name and not a keyword.
 	last     byte
 	word     string
 	sawSpace bool
+	prop     bool
+	// codeOnLine says the line holds code before the current byte. A
+	// --> is a comment only when it does not.
+	codeOnLine bool
 }
 
 type jsState uint8
@@ -471,6 +486,8 @@ func (l *jsLexer) readCode(s string, i *int) {
 	if *i+1 < len(s) {
 		next = s[*i+1]
 	}
+	codeOnLine := l.codeOnLine
+	l.codeOnLine = true
 	switch {
 	case c == '"':
 		l.state = jsDouble
@@ -483,6 +500,20 @@ func (l *jsLexer) readCode(s string, i *int) {
 	case c == '/' && next == '*':
 		*i++
 		l.state = jsBlockComment
+		l.codeOnLine = codeOnLine
+	case c == '<' && strings.HasPrefix(s[*i:], "<!--"):
+		l.state = jsLineComment
+	case c == '-' && !codeOnLine && strings.HasPrefix(s[*i:], "-->"):
+		l.state = jsLineComment
+	case (c == '+' || c == '-') && next == c:
+		// ++ or --. After an operand it is postfix, and the code
+		// ends in a value, so a slash after it is a division.
+		*i++
+		if l.endsInOperand() {
+			l.operand()
+		} else {
+			l.last, l.word, l.sawSpace, l.prop = c, "", false, false
+		}
 	case c == '/' && l.regexAllowed():
 		l.state = jsRegex
 	case c == '}' && len(l.braces) > 0 && l.braces[len(l.braces)-1] == 0:
@@ -490,6 +521,7 @@ func (l *jsLexer) readCode(s string, i *int) {
 		l.state = jsTemplate
 	case c == ' ' || c == '\t' || c == '\r' || c == '\n':
 		l.sawSpace = true
+		l.codeOnLine = codeOnLine
 	default:
 		if len(l.braces) > 0 {
 			switch c {
@@ -502,6 +534,7 @@ func (l *jsLexer) readCode(s string, i *int) {
 		if isIdentByte(c) {
 			if !isIdentByte(l.last) || l.sawSpace {
 				l.word = ""
+				l.prop = l.last == '.'
 			}
 			l.word += string(c)
 		} else {
@@ -514,7 +547,7 @@ func (l *jsLexer) readCode(s string, i *int) {
 // operand records that the code before the next token ends in a value,
 // so a slash there is a division.
 func (l *jsLexer) operand() {
-	l.last, l.word, l.sawSpace = 'a', "", false
+	l.last, l.word, l.sawSpace, l.prop = 'a', "", false, false
 }
 
 func (l *jsLexer) regexAllowed() bool {
@@ -522,9 +555,18 @@ func (l *jsLexer) regexAllowed() bool {
 		return true
 	}
 	if isIdentByte(l.last) {
-		return jsRegexAfterWord[l.word]
+		return !l.prop && jsRegexAfterWord[l.word]
 	}
 	return strings.IndexByte("(,=:[!&|?{};+-*%<>~^", l.last) >= 0
+}
+
+// endsInOperand says the code before the current token ends in a value:
+// an identifier that is not a keyword, a ), or a ].
+func (l *jsLexer) endsInOperand() bool {
+	if isIdentByte(l.last) {
+		return l.prop || !jsRegexAfterWord[l.word]
+	}
+	return l.last == ')' || l.last == ']'
 }
 
 func isIdentByte(c byte) bool {
@@ -547,11 +589,25 @@ func (l *jsLexer) place() (filterPlace, error) {
 	return placeNone, fmt.Errorf("in a regular expression: build the pattern in Go, or pass the value as a string to new RegExp")
 }
 
-// endLine ends a line comment. Each filter line is one source line.
-func (l *jsLexer) endLine() {
-	if l.state == jsLineComment {
+// endLine ends a line comment, and refuses a line that ends inside a
+// quoted string or a regular expression. Each filter line is one
+// source line. JavaScript continues a quoted string to the next line
+// only after a backslash, and never continues a regular expression.
+// So a line that ends in either shows that the lexer read the script
+// in a way that the browser does not.
+func (l *jsLexer) endLine(line string) error {
+	l.codeOnLine = false
+	switch l.state {
+	case jsLineComment:
 		l.state = jsCode
+	case jsDouble, jsSingle:
+		if n := len(line) - len(strings.TrimRight(line, `\`)); n%2 == 0 {
+			return fmt.Errorf("ends inside a string: close the string on this line, or end the line with \\. A regular expression that holds a quote can cause this: build it with new RegExp")
+		}
+	case jsRegex, jsRegexClass:
+		return fmt.Errorf("ends inside a regular expression: close it on this line. A division that the lexer reads as a regular expression can cause this: put a space or ( ) around the division")
 	}
+	return nil
 }
 
 // compileInterp splits interpolated text into literal and expression

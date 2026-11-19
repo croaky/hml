@@ -6,9 +6,7 @@ Finding:
   JavaScript string can complete `</script` or `<!--` with the literal
   text before it, and end the script element.
 
-Outcome: fix it. Do it in any order with
-`todo/1-javascript-lexer-fail-closed.md`. The two plans touch
-different functions.
+Outcome: fix it.
 
 ## Threat
 
