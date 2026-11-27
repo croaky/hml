@@ -126,9 +126,12 @@
 //     another, and its var then replaces the other block's array.
 //
 //     In a string, a value is its text, as in markup: 42 reads as "42"
-//     and nil as "". In code, a string is a string; a number, a bool,
-//     and nil are 42, true, and null; a SafeJS value is the expression
-//     Go built, in ( ); and any other value is its JSON.
+//     and nil as "". In code, a string is a string; a finite number, a
+//     bool, and nil are 42, true, and null; a SafeJS value is the
+//     expression Go built, in ( ); and any other value is its JSON. A
+//     non-finite float64 (NaN, +Inf, or -Inf) in code is a render error,
+//     matching JSON: Go formats infinity as +Inf, which reads an
+//     undefined identifier in JavaScript and stops the block.
 //
 //     A #{} in a comment or a regular expression is a Parse error,
 //     because a value has no meaning there. So is an octal escape such

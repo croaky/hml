@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"html"
+	"math"
 	"reflect"
 	"regexp"
 	"slices"
@@ -655,10 +656,11 @@ func jsValuesName(vals string) []byte {
 // writeJSValue writes a value as one element of a :javascript block's
 // array. In a string place, the value is its text, as a quoted string,
 // so nil reads as "" and 42 as "42", as they would in markup. In
-// code, a string is a quoted string, a number, a bool, and nil are 42,
-// true, and null, a SafeJS value is the expression the handler built,
-// in ( ) so a comma in it cannot add an element, and any other value
-// is its JSON.
+// code, a string is a quoted string, a finite number, a bool, and nil
+// are 42, true, and null, a SafeJS value is the expression the handler
+// built, in ( ) so a comma in it cannot add an element, and any other
+// value is its JSON. A non-finite float64 returns an error, matching
+// JSON, because Go writes +Inf as an undefined JavaScript identifier.
 func writeJSValue(buf *strings.Builder, place filterPlace, val any) error {
 	if place == placeJSString {
 		buf.WriteByte('"')
@@ -673,7 +675,12 @@ func writeJSValue(buf *strings.Builder, place filterPlace, val any) error {
 		buf.WriteByte('(')
 		buf.WriteString(string(v))
 		buf.WriteByte(')')
-	case bool, int, int64, float64:
+	case bool, int, int64:
+		buf.WriteString(stringify(v))
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("a :javascript value: non-finite float64 %v", v)
+		}
 		buf.WriteString(stringify(v))
 	case string, authored, SafeString, SafeCSS:
 		buf.WriteByte('"')

@@ -1,6 +1,7 @@
 package hml
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -279,6 +280,20 @@ func TestJavaScriptReadsASlashAfterAnOperandAsADivision(t *testing.T) {
 	// A slash after a keyword still starts a regular expression.
 	is.Eq(renderJS(t, "return /'/.test(s) && f(#{v});", v), wantJS(`"alert(1)"`, "return /'/.test(s) && f($H[0]);"))
 	is.Eq(renderJS(t, "x = typeof /'/;\nf(#{v});", v), wantJS(`"alert(1)"`, "x = typeof /'/;\nf($H[0]);"))
+}
+
+func TestJavaScriptRefusesNonFiniteFloatInCode(t *testing.T) {
+	is := is.New(t)
+	tmpl := mustParse(t, ":javascript\n  f(#{v});\n")
+	for _, v := range []float64{math.Inf(1), math.Inf(-1), math.NaN()} {
+		_, err := tmpl.Render(map[string]any{"v": v}, nil)
+		is.HasErr(err)
+	}
+	// Finite floats still render in code place, and non-finite floats
+	// still render as quoted strings in string place.
+	is.Eq(renderJS(t, `f(#{v});`, map[string]any{"v": 1.5}), wantJS(`1.5`, `f($H[0]);`))
+	is.Eq(renderJS(t, `f(#{v});`, map[string]any{"v": 1e20}), wantJS(`1e+20`, `f($H[0]);`))
+	is.Eq(renderJS(t, `x = "#{v}";`, map[string]any{"v": math.Inf(1)}), wantJS(`"+Inf"`, "x = `${$H[0]}`;"))
 }
 
 func TestCSSTakesOnlyANumberOrSafeCSS(t *testing.T) {
