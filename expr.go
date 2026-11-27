@@ -2,6 +2,7 @@ package hml
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"slices"
 	"strconv"
@@ -806,7 +807,7 @@ func (c *Context) lookup(key string) (any, bool) {
 //
 // Everywhere but the policy, an authored behaves as its underlying
 // string. That is equal, truthy, stringify, and toAttrVal below, and
-// toFloat by declining it the way it declines any string.
+// toNum by declining it the way it declines any string.
 type authored string
 
 // unauthored returns the plain string behind an authored value, and
@@ -983,20 +984,22 @@ func evalCmp(node *astNode, ctx context) (any, error) {
 	case "!=":
 		return !equal(left, right), nil
 	case ">", "<", ">=", "<=":
-		ln, lok := toFloat(left)
-		rn, rok := toFloat(right)
-		if !lok || !rok {
+		cmp, ordered, ok := cmpNum(left, right)
+		if !ok {
 			return nil, fmt.Errorf("cannot compare %v %s %v", left, node.op, right)
+		}
+		if !ordered {
+			return false, nil
 		}
 		switch node.op {
 		case ">":
-			return ln > rn, nil
+			return cmp > 0, nil
 		case "<":
-			return ln < rn, nil
+			return cmp < 0, nil
 		case ">=":
-			return ln >= rn, nil
+			return cmp >= 0, nil
 		case "<=":
-			return ln <= rn, nil
+			return cmp <= 0, nil
 		}
 	}
 	return nil, fmt.Errorf("unknown operator %q", node.op)
@@ -1004,7 +1007,7 @@ func evalCmp(node *astNode, ctx context) (any, error) {
 
 // equal compares two values. Values must be the same type to be equal (no
 // cross-type coercion). Numeric types (int, int64, float64) are compared by
-// numeric value.
+// exact numeric value.
 //
 // Authorship is not part of a value's identity: a template compares a
 // local against a literal constantly, and `status == "Pool"` must not
@@ -1020,10 +1023,8 @@ func equal(a, b any) bool {
 	if isNil(a) || isNil(b) {
 		return isNil(a) && isNil(b)
 	}
-	an, aNum := toFloat(a)
-	bn, bNum := toFloat(b)
-	if aNum && bNum {
-		return an == bn
+	if cmp, ordered, ok := cmpNum(a, b); ok {
+		return ordered && cmp == 0
 	}
 	switch av := a.(type) {
 	case string:
@@ -1038,17 +1039,95 @@ func equal(a, b any) bool {
 	return false
 }
 
-func toFloat(v any) (float64, bool) {
+type numVal struct {
+	i     int64
+	f     float64
+	isInt bool
+}
+
+func toNum(v any) (numVal, bool) {
 	switch n := v.(type) {
 	case int64:
-		return float64(n), true
+		return numVal{i: n, isInt: true}, true
 	case int:
-		return float64(n), true
+		return numVal{i: int64(n), isInt: true}, true
 	case float64:
-		return n, true
+		return numVal{f: n}, true
 	default:
+		return numVal{}, false
+	}
+}
+
+// cmpNum compares two numeric values (int, int64, float64) by exact
+// numeric value. ok is false if either operand is not one of those
+// types. ordered is false when either operand is NaN.
+func cmpNum(a, b any) (cmp int, ordered bool, ok bool) {
+	an, aOk := toNum(a)
+	if !aOk {
+		return 0, false, false
+	}
+	bn, bOk := toNum(b)
+	if !bOk {
+		return 0, false, false
+	}
+	switch {
+	case an.isInt && bn.isInt:
+		if an.i < bn.i {
+			return -1, true, true
+		}
+		if an.i > bn.i {
+			return 1, true, true
+		}
+		return 0, true, true
+	case an.isInt:
+		c, ord := cmpIntFloat(an.i, bn.f)
+		return c, ord, true
+	case bn.isInt:
+		c, ord := cmpIntFloat(bn.i, an.f)
+		return -c, ord, true
+	default:
+		if math.IsNaN(an.f) || math.IsNaN(bn.f) {
+			return 0, false, true
+		}
+		if an.f < bn.f {
+			return -1, true, true
+		}
+		if an.f > bn.f {
+			return 1, true, true
+		}
+		return 0, true, true
+	}
+}
+
+// cmpIntFloat compares an int64 against a float64 by exact value.
+// ordered is false when f is NaN.
+func cmpIntFloat(i int64, f float64) (cmp int, ordered bool) {
+	if math.IsNaN(f) {
 		return 0, false
 	}
+	// -2^63 is exact in float64 and equals math.MinInt64.
+	// +2^63 is exact in float64 and exceeds math.MaxInt64 by 1.
+	if f < -0x1p63 {
+		return 1, true
+	}
+	if f >= 0x1p63 {
+		return -1, true
+	}
+	trunc := math.Trunc(f)
+	fi := int64(trunc)
+	if i < fi {
+		return -1, true
+	}
+	if i > fi {
+		return 1, true
+	}
+	if trunc < f {
+		return -1, true
+	}
+	if trunc > f {
+		return 1, true
+	}
+	return 0, true
 }
 
 // evalField resolves a dot-separated field path against the context.

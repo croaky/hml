@@ -195,7 +195,7 @@ under test is not the literal's default type: `Eq(gotInt64, int64(3))`.
 - A rejection needs two tests: that the value is refused, and that the
   legitimate form still renders. A policy that only rejects is one
   nobody can use.
-- Value semantics live in five type switches — `equal`, `toFloat`,
+- Value semantics live in five type switches — `equal`, `toNum`,
   `truthy`, `stringify`, and `toAttrVal`. A new value type needs a case
   and a test in each, or it behaves like a plain string in some places
   and not others.

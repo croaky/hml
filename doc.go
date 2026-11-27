@@ -251,8 +251,9 @@
 //
 // Equality (==, !=): values compare equal only within the same type; there
 // is no cross-type coercion, with one exception — the numeric types int,
-// int64, and float64 compare by numeric value, so an int64 column and an
-// integer literal compare as expected. This numeric case exists to absorb
+// int64, and float64 compare by exact numeric value, without rounding
+// integers through float64, so an int64 column and an integer literal
+// compare as expected even above 2^53. This numeric case exists to absorb
 // the untyped ingest boundary (pgx yields int64, literals are int), not as
 // a general coercion feature.
 //

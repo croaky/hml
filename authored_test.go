@@ -190,7 +190,7 @@ func TestAuthoredValueSemantics(t *testing.T) {
 	a := authored("x")
 
 	// Not a number, as a plain string is not.
-	_, ok := toFloat(a)
+	_, ok := toNum(a)
 	is.True(!ok)
 
 	// Truthy, as a plain string is, including when empty.

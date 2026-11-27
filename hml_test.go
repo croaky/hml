@@ -2,6 +2,7 @@ package hml
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -1185,4 +1186,85 @@ func TestParseCountsElseBranches(t *testing.T) {
 
 	nested := mustParse(t, "%div\n  - if a\n    x\n  - else\n    y\n")
 	is.Eq(nested.nodes[0].children[0].elseCount, 1)
+}
+
+func TestNumericComparisonIsExact(t *testing.T) {
+	is := is.New(t)
+
+	const (
+		bigA int64 = 1<<53 + 1
+		bigB int64 = 1 << 53
+		sA   int64 = 1<<62 + 1
+		sB   int64 = 1<<62 + 2
+	)
+
+	renderCmp := func(op string, a, b any) string {
+		t.Helper()
+		src := fmt.Sprintf("- if a %s b\n  yes\n- else\n  no\n", op)
+		return mustRender(t, src, map[string]any{"a": a, "b": b})
+	}
+
+	// Distinct int64 values above 2^53, near 2^62, and at the limits
+	// must not round to equal floats.
+	for _, pair := range []struct{ lo, hi any }{
+		{bigB, bigA},
+		{sA, sB},
+		{int64(math.MaxInt64 - 1), int64(math.MaxInt64)},
+		{int64(math.MinInt64), int64(math.MinInt64 + 1)},
+		{int(bigB), bigA},
+		{bigB, int(bigA)},
+	} {
+		is.Eq(renderCmp("==", pair.lo, pair.hi), "no\n")
+		is.Eq(renderCmp("!=", pair.lo, pair.hi), "yes\n")
+		is.Eq(renderCmp("<", pair.lo, pair.hi), "yes\n")
+		is.Eq(renderCmp("<=", pair.lo, pair.hi), "yes\n")
+		is.Eq(renderCmp(">", pair.lo, pair.hi), "no\n")
+		is.Eq(renderCmp(">=", pair.lo, pair.hi), "no\n")
+		is.Eq(renderCmp("==", pair.hi, pair.hi), "yes\n")
+		is.Eq(renderCmp("!=", pair.hi, pair.hi), "no\n")
+	}
+
+	// An int64 local equals an integer literal of the same value above 2^53.
+	is.Eq(mustRender(t, "- if id == 9007199254740993\n  yes\n- else\n  no\n", map[string]any{"id": bigA}), "yes\n")
+	is.Eq(mustRender(t, "- if id == 9007199254740992\n  yes\n- else\n  no\n", map[string]any{"id": bigA}), "no\n")
+
+	// Exact int64 vs float64 comparisons, including bounds and fractions.
+	is.Eq(renderCmp("==", bigA, float64(bigB)), "no\n")
+	is.Eq(renderCmp(">", bigA, float64(bigB)), "yes\n")
+	is.Eq(renderCmp("<", float64(bigB), bigA), "yes\n")
+	is.Eq(renderCmp("==", bigB, float64(bigB)), "yes\n")
+
+	// float64(math.MaxInt64) rounds up to 2^63, which is greater than MaxInt64.
+	is.Eq(renderCmp("<", int64(math.MaxInt64), float64(math.MaxInt64)), "yes\n")
+	is.Eq(renderCmp("==", int64(math.MaxInt64), float64(math.MaxInt64)), "no\n")
+	is.Eq(renderCmp(">", float64(math.MaxInt64), int64(math.MaxInt64)), "yes\n")
+
+	// float64(math.MinInt64) is exact (-2^63).
+	is.Eq(renderCmp("==", int64(math.MinInt64), float64(math.MinInt64)), "yes\n")
+	is.Eq(renderCmp(">", int64(math.MinInt64+1), float64(math.MinInt64)), "yes\n")
+	is.Eq(renderCmp(">", int64(math.MinInt64), math.Inf(-1)), "yes\n")
+	is.Eq(renderCmp("<", int64(math.MaxInt64), math.Inf(1)), "yes\n")
+
+	// Fractions around positive, negative, and zero.
+	is.Eq(renderCmp("<", int64(2), 2.5), "yes\n")
+	is.Eq(renderCmp(">", int64(3), 2.5), "yes\n")
+	is.Eq(renderCmp(">", int64(-2), -2.5), "yes\n")
+	is.Eq(renderCmp("<", int64(-3), -2.5), "yes\n")
+	is.Eq(renderCmp(">", int64(0), -0.5), "yes\n")
+	is.Eq(renderCmp("<", int64(0), 0.5), "yes\n")
+	is.Eq(renderCmp("==", int64(0), math.Copysign(0, -1)), "yes\n")
+
+	// NaN is unordered against both integers and floats.
+	for _, pair := range []struct{ a, b any }{
+		{int64(1), math.NaN()},
+		{math.NaN(), int64(1)},
+		{math.NaN(), math.NaN()},
+	} {
+		is.Eq(renderCmp("==", pair.a, pair.b), "no\n")
+		is.Eq(renderCmp("!=", pair.a, pair.b), "yes\n")
+		is.Eq(renderCmp("<", pair.a, pair.b), "no\n")
+		is.Eq(renderCmp("<=", pair.a, pair.b), "no\n")
+		is.Eq(renderCmp(">", pair.a, pair.b), "no\n")
+		is.Eq(renderCmp(">=", pair.a, pair.b), "no\n")
+	}
 }
