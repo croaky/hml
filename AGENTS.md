@@ -71,6 +71,12 @@ all literals has its attribute string written there
 no builder per tag, per text node, or per partial. Measure a change
 to `render.go` with `go test -bench . -benchmem` before and after.
 
+`:javascript` is an intentional feature, not legacy debt to remove.
+`hml` separates dynamic `#{}` values from script source so server-rendered
+applications can return fragment scripts without replacing them with an
+HTML-attribute DSL (<https://dancroak.com/web/ajax>). See `SECURITY.md`
+for the full threat model and accepted risks.
+
 ## Grammar
 
 Alongside the Go package, a tree-sitter grammar so editors can
